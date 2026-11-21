@@ -31,6 +31,7 @@ Integration tests use testcontainers Postgres 18 with `wal_level=logical` (needs
 - Tests first, run with `-race`.
 - Every exported Go identifier gets a short doc comment starting with its name; comment unexported ones only when the why is non-obvious.
 - Install dev tools as Go tools (`go get -tool`), not globally.
+- Testify: prefer `require` over `assert`.
 - Preferred tools: testify, goldie, tack, mockery, task.
 
 ## Commit messages
