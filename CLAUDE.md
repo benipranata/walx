@@ -23,6 +23,7 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - Postgres: `pglogrepl.SendStandbyStatusUpdate` replaces a flush or apply LSN of 0 with the write position and would confirm unhandled WAL, so `NewStandby` rejects a zero start; seed it with `SlotInfo.ConfirmedFlushLSN`. `StartStream` still takes 0 to resume from the slot.
 - Postgres: pgconn is not safe for concurrent use; `Standby.Run` is the single goroutine that receives (with a deadline so the timer fires) and writes. `ReceiveMessage` after a timeout loses no data; copy `WALData`, since pgconn reuses its buffer.
 - Postgres: `FOR ALL TABLES` needs superuser, also on 18. With `publish_via_partition_root`, `pg_publication_tables` lists the root table. `auto_alter` never switches between `FOR ALL TABLES` and a table list.
+- Config: slot names are unique per server (host:port, scheme and credentials ignored) because slots are cluster-wide; publication names per server and database; table names per database.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 
 ## Commands

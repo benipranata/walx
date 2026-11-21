@@ -48,6 +48,7 @@ func (c *Config) validate() error {
 	names := map[string]bool{}
 	paths := map[string]bool{}
 	slots := map[[2]string]bool{}
+	pubs := map[[2]string]bool{}
 	for i := range c.Databases {
 		d := &c.Databases[i]
 		key := func(k string) string { return fmt.Sprintf("databases[%d].%s", i, k) }
@@ -65,11 +66,21 @@ func (c *Config) validate() error {
 		validatePostgres(d.Postgres, key, bad)
 		// The slot defaults from the name, so it is empty only for an unnamed
 		// entry, which is already reported.
-		if id := [2]string{d.Postgres.URL, d.Postgres.Slot}; d.Postgres.URL != "" && d.Postgres.Slot != "" {
-			if slots[id] {
-				bad(key("postgres.slot"), "slot %q is already used with the same url", d.Postgres.Slot)
+		if server, database, ok := serverOf(d.Postgres.URL); ok {
+			// Slots are cluster-wide and publications are per database, so
+			// two spellings of one server must not share either name.
+			if id := [2]string{server, d.Postgres.Slot}; d.Postgres.Slot != "" {
+				if slots[id] {
+					bad(key("postgres.slot"), "slot %q is already used on the same server", d.Postgres.Slot)
+				}
+				slots[id] = true
 			}
-			slots[id] = true
+			if id := [2]string{server + database, d.Postgres.Publication}; d.Postgres.Publication != "" {
+				if pubs[id] {
+					bad(key("postgres.publication"), "publication %q is already used on the same database", d.Postgres.Publication)
+				}
+				pubs[id] = true
+			}
 		}
 
 		validateSink(d.Sink, key, bad)
@@ -84,8 +95,14 @@ func (c *Config) validate() error {
 			paths[p] = true
 		}
 
+		tables := map[string]bool{}
 		for j, t := range d.Tables {
-			validateTable(t, func(k string) string { return key(fmt.Sprintf("tables[%d].%s", j, k)) }, bad)
+			tkey := func(k string) string { return key(fmt.Sprintf("tables[%d].%s", j, k)) }
+			validateTable(t, tkey, bad)
+			if tables[t.Name] {
+				bad(tkey("name"), "duplicate table %q", t.Name)
+			}
+			tables[t.Name] = true
 		}
 		validateRetry(d.Retry, key, bad)
 		if !slices.Contains(permanentErrors, d.OnPermanentError) {
@@ -93,6 +110,20 @@ func (c *Config) validate() error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+// serverOf returns the host and port of rawURL, and its database name, with
+// the scheme and credentials left out; ok is false for an unparseable URL.
+func serverOf(rawURL string) (server, database string, ok bool) {
+	u, err := url.Parse(rawURL)
+	if err != nil || u.Hostname() == "" {
+		return "", "", false
+	}
+	port := u.Port()
+	if port == "" {
+		port = "5432"
+	}
+	return strings.ToLower(u.Hostname()) + ":" + port, "/" + strings.TrimPrefix(u.Path, "/"), true
 }
 
 func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {

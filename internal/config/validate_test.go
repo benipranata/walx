@@ -35,6 +35,16 @@ func TestValidationErrors(t *testing.T) {
 		{"url without scheme", "databases:\n  - {name: a, postgres: {url: \"localhost/db\"}, sink: {type: stdout}}\n", "databases[0].postgres.url"},
 		{"url wrong scheme", "databases:\n  - {name: a, postgres: {url: \"mysql://h/db\"}, sink: {type: stdout}}\n", "databases[0].postgres.url"},
 		{"url unparseable", "databases:\n  - {name: a, postgres: {url: \"postgres://h:port/db\"}, sink: {type: stdout}}\n", "databases[0].postgres.url"},
+		{"duplicate table", mk("", "    tables:\n      - name: public.t\n      - name: public.t\n"), "databases[0].tables[1].name"},
+		{"same slot in another database of one server", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@h/d1\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres://u@h/d2\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
+		{"same slot through postgresql scheme and explicit port", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@H/d\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgresql://v@h:5432/d\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
+		{"same publication on one database", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@h/d\", slot: s1, publication: p}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres://u@h/d\", slot: s2, publication: p}, sink: {type: stdout}}\n", "databases[1].postgres.publication"},
 		{"unknown sink type", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: kafka}}\n", "databases[0].sink.type"},
 		{"missing sink", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}}\n", "databases[0].sink.type"},
 		{"file sink without path", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: file}}\n", "databases[0].sink.path"},
@@ -126,6 +136,15 @@ func TestValidationAccepts(t *testing.T) {
 		{"same url, different slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n"},
+		{"same slot on different servers", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@h1/d\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres://u@h2/d\", slot: s}, sink: {type: stdout}}\n"},
+		{"same slot on different ports", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@h:5432/d\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres://u@h:5433/d\", slot: s}, sink: {type: stdout}}\n"},
+		{"same publication name in different databases", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres://u@h/d1\", slot: s1, publication: p}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres://u@h/d2\", slot: s2, publication: p}, sink: {type: stdout}}\n"},
 		{"stdout sinks may repeat", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/a\"}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/b\"}, sink: {type: stdout}}\n"},
