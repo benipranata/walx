@@ -102,6 +102,29 @@ func TestPublicationIntegration(t *testing.T) {
 			cfg.Postgres.AutoAlter = false
 			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
 		}},
+		{name: "row filter and column list count as drift", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			_, err := admin.Exec(ctx, `CREATE TABLE f (id int primary key, v text)`)
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, `CREATE PUBLICATION p_filter FOR TABLE f (id) WHERE (id > 0)
+				WITH (publish = 'insert, update', publish_via_partition_root = true)`)
+			require.NoError(t, err)
+			cfg := db("p_filter", true, false, tbl("public.f"))
+
+			err = EnsurePublication(ctx, c.PgConn(), cfg)
+			require.ErrorIs(t, err, ErrPublicationDrift)
+			require.ErrorContains(t, err, "public.f")
+			require.ErrorContains(t, err, "row filter or column list")
+
+			cfg.Postgres.AutoAlter = true
+			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
+			var filtered bool
+			require.NoError(t, admin.QueryRow(ctx, `SELECT r.prqual IS NOT NULL OR r.prattrs IS NOT NULL
+				FROM pg_publication_rel r JOIN pg_publication p ON p.oid = r.prpubid WHERE p.pubname = 'p_filter'`).Scan(&filtered))
+			require.False(t, filtered)
+			cfg.Postgres.AutoAlter = false
+			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
+		}},
 		{name: "failed auto_alter leaves the publication unchanged", run: func(t *testing.T) {
 			c := connect(t, ctx, url)
 			_, err := admin.Exec(ctx, `CREATE PUBLICATION p_half FOR TABLE a WITH (publish = 'insert')`)

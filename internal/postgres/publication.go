@@ -36,6 +36,7 @@ type pubState struct {
 	Insert, Update, Delete, Truncate bool
 	ViaRoot                          bool
 	Tables                           []string
+	Filtered                         []string // tables with a row filter or column list
 }
 
 // PublishOps returns the union of ops across tables in Postgres order. It is
@@ -97,6 +98,13 @@ func EnsurePublication(ctx context.Context, pg *pgconn.PgConn, db config.Databas
 		}
 		for _, r := range trows {
 			got.Tables = append(got.Tables, str(r[0]))
+		}
+		frows, err := query(ctx, pg, pubFilteredQuery(spec.Name))
+		if err != nil {
+			return fmt.Errorf("read filters of publication %q: %w", spec.Name, err)
+		}
+		for _, r := range frows {
+			got.Filtered = append(got.Filtered, str(r[0]))
 		}
 	}
 	problems, fixes, fixable := spec.drift(got)
@@ -171,9 +179,18 @@ func (s pubSpec) drift(got pubState) (problems, fixes []string, fixable bool) {
 	if setOptions {
 		fixes = append(fixes, fmt.Sprintf("ALTER PUBLICATION %s SET (%s)", pgx.Identifier{s.Name}.Sanitize(), s.options()))
 	}
+	setTable := false
 	if !s.AllTables && !slices.Equal(got.Tables, s.Tables) {
 		problems = append(problems, fmt.Sprintf("tables are %s, want %s",
 			strings.Join(got.Tables, ", "), strings.Join(s.Tables, ", ")))
+		setTable = true
+	}
+	// A hand-added filter silently drops events, and SET TABLE resets it.
+	if len(got.Filtered) > 0 {
+		problems = append(problems, "row filter or column list on "+strings.Join(got.Filtered, ", "))
+		setTable = true
+	}
+	if setTable {
 		fixes = append(fixes, fmt.Sprintf("ALTER PUBLICATION %s SET TABLE %s", pgx.Identifier{s.Name}.Sanitize(), quoteTables(s.Tables)))
 	}
 	return problems, fixes, true
@@ -197,6 +214,13 @@ func pubQuery(name string) string {
 func pubTablesQuery(name string) string {
 	return "SELECT schemaname || '.' || tablename FROM pg_publication_tables WHERE pubname = " +
 		quoteLiteral(name) + " ORDER BY 1"
+}
+
+func pubFilteredQuery(name string) string {
+	return "SELECT n.nspname || '.' || c.relname FROM pg_publication_rel r " +
+		"JOIN pg_publication p ON p.oid = r.prpubid JOIN pg_class c ON c.oid = r.prrelid " +
+		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
+		"WHERE p.pubname = " + quoteLiteral(name) + " AND (r.prqual IS NOT NULL OR r.prattrs IS NOT NULL) ORDER BY 1"
 }
 
 func parsePub(row [][]byte) (pubState, error) {

@@ -95,6 +95,8 @@ func TestQuoteTables(t *testing.T) {
 func TestPubQueries(t *testing.T) {
 	require.Contains(t, pubQuery("p'x"), "FROM pg_publication WHERE pubname = 'p''x'")
 	require.Contains(t, pubTablesQuery("p"), "FROM pg_publication_tables WHERE pubname = 'p'")
+	require.Contains(t, pubFilteredQuery("p'x"), "p.pubname = 'p''x'")
+	require.Contains(t, pubFilteredQuery("p"), "prqual IS NOT NULL OR r.prattrs IS NOT NULL")
 }
 
 func TestParsePub(t *testing.T) {
@@ -171,6 +173,20 @@ func TestPubSpecDrift(t *testing.T) {
 		{
 			name: "table set differs", spec: list, got: pubState{Insert: true, Update: true, ViaRoot: true, Tables: []string{"public.a", "public.c"}},
 			wantProblems: []string{"tables are public.a, public.c, want public.a, public.b"},
+			wantFixes:    []string{`ALTER PUBLICATION "p" SET TABLE "public"."a", "public"."b"`},
+			wantFixable:  true,
+		},
+		{
+			name: "row filter or column list", spec: list,
+			got:          pubState{Insert: true, Update: true, ViaRoot: true, Tables: list.Tables, Filtered: []string{"public.a"}},
+			wantProblems: []string{"row filter or column list on public.a"},
+			wantFixes:    []string{`ALTER PUBLICATION "p" SET TABLE "public"."a", "public"."b"`},
+			wantFixable:  true,
+		},
+		{
+			name: "table set and row filter need one SET TABLE", spec: list,
+			got:          pubState{Insert: true, Update: true, ViaRoot: true, Tables: []string{"public.a", "public.c"}, Filtered: []string{"public.c"}},
+			wantProblems: []string{"tables are public.a, public.c, want public.a, public.b", "row filter or column list on public.c"},
 			wantFixes:    []string{`ALTER PUBLICATION "p" SET TABLE "public"."a", "public"."b"`},
 			wantFixable:  true,
 		},
