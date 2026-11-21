@@ -34,7 +34,7 @@ Integration tests use testcontainers Postgres 18 with `wal_level=logical` (needs
 - Tests first, run with `-race`.
 - Every exported Go identifier gets a short doc comment starting with its name; comment unexported ones only when the why is non-obvious.
 - Go files: one concern per file, named after it (`sink.go`, `lsn.go`); at most one interface per file.
-- Within a file: type, constructor, methods, then unexported helpers. Keep package docs in `doc.go` and tests in a matching `_test.go`.
+- Within a file: type, constructor, methods, then unexported helpers. Keep tests in a matching `_test.go`.
 - Install dev tools as Go tools (`go get -tool`), not globally.
 - Testify: prefer `require` over `assert`.
 - Write every test table-driven, even with one case.
