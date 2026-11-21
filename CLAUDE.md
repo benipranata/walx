@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connection, T1.5 slot, publication and stream start, T1.6 standby writer) and the `cmd/walx` snapshot stub (T1.7) are implemented so far; the postgres integration tests have not yet run against a real Postgres.
+Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connection, T1.5 slot, publication and stream start, T1.6 standby writer), the `cmd/walx` snapshot stub (T1.7) and the relation cache and tuple decoding (T2.1, `decode.go`) are implemented so far; the postgres integration tests have not yet run against a real Postgres.
 
 ## Architecture rules
 
@@ -27,6 +27,7 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - Postgres: `FOR ALL TABLES` needs superuser, also on 18. With `publish_via_partition_root`, `pg_publication_tables` lists the root table. `auto_alter` never switches between `FOR ALL TABLES` and a table list.
 - Config: slot names are unique per server (host:port, scheme and credentials ignored) because slots are cluster-wide; publication names per server and database; table names per database.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
+- Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.
 
 ## Commands
 
