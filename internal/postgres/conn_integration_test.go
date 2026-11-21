@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/require"
 
@@ -96,13 +97,17 @@ func TestConnIntegration(t *testing.T) {
 
 			var pid int
 			require.NoError(t, admin.QueryRow(ctx,
-				`SELECT pid FROM pg_stat_replication LIMIT 1`).Scan(&pid))
+				`SELECT active_pid FROM pg_replication_slots WHERE slot_name = 's'`).Scan(&pid))
 			_, err = admin.Exec(ctx, `SELECT pg_terminate_backend($1)`, pid)
 			require.NoError(t, err)
 			insert(4, 6)
 
-			_, err = pglogrepl.IdentifySystem(ctx, c.PgConn())
-			require.Error(t, err)
+			require.Eventually(t, func() bool {
+				rctx, rcancel := context.WithTimeout(ctx, time.Second)
+				defer rcancel()
+				_, err := c.PgConn().ReceiveMessage(rctx)
+				return err != nil && !pgconn.Timeout(err)
+			}, 10*time.Second, time.Millisecond, "the terminated walsender must end the stream")
 
 			sys, err := c.Reconnect(ctx)
 			require.NoError(t, err)
