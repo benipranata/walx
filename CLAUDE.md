@@ -28,7 +28,7 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - Postgres: with REPLICA IDENTITY FULL the old tuple of an update carries the full TOAST value (recorded by `TestReplicaIdentityFullToastIntegration`), while the new tuple has `'u'` (`event.Unchanged`); so Before holds the value and After does not.
 - Config: slot names are unique per server (host:port, scheme and credentials ignored) because slots are cluster-wide; publication names per server and database; table names per database.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
-- Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.
+- Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.- Postgres: under REPLICA IDENTITY FULL the Relation message flags every column as key, so `DecodeDML` falls back to the whole row; the identity check (T4.5) must pass the primary key in its `keys` map.
 
 ## Commands
 
