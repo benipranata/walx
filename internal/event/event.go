@@ -39,7 +39,9 @@ func (e *Event) Transition(col string) (from, to any, ok bool) {
 
 // Changed reports whether col differs between Before and After. It is false
 // when Transition has no answer, and when col is Unchanged on either side,
-// since that is not known to have changed.
+// since that is not known to have changed. Values compare with
+// reflect.DeepEqual, so the decoder must give a column one Go type: int(1) and
+// int64(1) differ.
 func (e *Event) Changed(col string) bool {
 	from, to, ok := e.Transition(col)
 	if !ok || from == Unchanged || to == Unchanged {
