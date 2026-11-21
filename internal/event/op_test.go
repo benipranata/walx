@@ -10,7 +10,7 @@ import (
 )
 
 func TestOpJSON(t *testing.T) {
-	for _, op := range []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate} {
+	for _, op := range []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate, event.OpSnapshot} {
 		b, err := json.Marshal(op)
 		require.NoError(t, err)
 		require.Equal(t, `"`+string(op)+`"`, string(b))

@@ -37,6 +37,7 @@ func TestValidationErrors(t *testing.T) {
 		{"table quoted", mk("", "    tables:\n      - name: '\"my.schema\".t'\n"), "databases[0].tables[0].name"},
 		{"table missing name", mk("", "    tables:\n      - ops: [insert]\n"), "databases[0].tables[0].name"},
 		{"unknown op", mk("", "    tables:\n      - name: public.t\n        ops: [insert, upsert]\n"), "databases[0].tables[0].ops[1]"},
+		{"snapshot is not a table op", mk("", "    tables:\n      - name: public.t\n        ops: [insert, snapshot]\n"), "databases[0].tables[0].ops[1]"},
 		{"unknown retry policy", mk("", "    retry:\n      policy: sometimes\n"), "databases[0].retry.policy"},
 		{"zero retry initial", mk("", "    retry:\n      initial: 0s\n"), "databases[0].retry.initial"},
 		{"negative retry max", mk("", "    retry:\n      max: -1s\n"), "databases[0].retry.max"},
