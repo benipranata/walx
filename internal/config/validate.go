@@ -23,9 +23,10 @@ var (
 const maxIdentLen = 63
 
 var (
-	// A name is embedded in Event.ID and the default slot and publication, so
-	// it is limited to what a slot name allows, minus upper case.
-	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	// A name is embedded in Event.ID and the default slot and publication
+	// (walx_<name>), so it is limited to 58 characters to fit 63, and to
+	// what a slot name allows, minus upper case.
+	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,57}$`)
 	slotPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 )
 
@@ -116,14 +117,21 @@ func (c *Config) validate() error {
 // the scheme and credentials left out; ok is false for an unparseable URL.
 func serverOf(rawURL string) (server, database string, ok bool) {
 	u, err := url.Parse(rawURL)
-	if err != nil || u.Hostname() == "" {
+	if err != nil {
 		return "", "", false
 	}
-	port := u.Port()
+	host, port := u.Hostname(), u.Port()
+	if host == "" {
+		// A unix-socket URL names the server in the host query parameter.
+		host = u.Query().Get("host")
+		if host == "" {
+			return "", "", false
+		}
+	}
 	if port == "" {
 		port = "5432"
 	}
-	return strings.ToLower(u.Hostname()) + ":" + port, "/" + strings.TrimPrefix(u.Path, "/"), true
+	return strings.ToLower(host) + ":" + port, "/" + strings.TrimPrefix(u.Path, "/"), true
 }
 
 func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {
@@ -174,6 +182,8 @@ func validateTable(t TableConfig, key func(string) string, bad reporter) {
 	for i, op := range t.Ops {
 		if !slices.Contains(ops, op) {
 			bad(key(fmt.Sprintf("ops[%d]", i)), "unknown op %q", op)
+		} else if slices.Contains(t.Ops[:i], op) {
+			bad(key(fmt.Sprintf("ops[%d]", i)), "duplicate op %q", op)
 		}
 	}
 }

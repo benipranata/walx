@@ -67,6 +67,14 @@ func TestValidationErrors(t *testing.T) {
 		{"op in upper case", mk("", "    tables:\n      - name: public.t\n        ops: [Insert]\n"), "databases[0].tables[0].ops[0]"},
 		{"empty ops", mk("", "    tables:\n      - {name: public.t, ops: []}\n"), "databases[0].tables[0].ops"},
 		{"snapshot is not a table op", mk("", "    tables:\n      - name: public.t\n        ops: [insert, snapshot]\n"), "databases[0].tables[0].ops[1]"},
+		{"name over 58 characters", "databases:\n  - {name: " + strings.Repeat("a", 59) + ", postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n", "databases[0].name"},
+		{"duplicate op in a table", mk("", "    tables:\n      - name: public.t\n        ops: [insert, update, insert]\n"), "databases[0].tables[0].ops[2]"},
+		{"unix socket same slot", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres:///e?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
+		{"unix socket same publication", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s1, publication: p}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s2, publication: p}, sink: {type: stdout}}\n", "databases[1].postgres.publication"},
 		{"unknown retry policy", mk("", "    retry:\n      policy: sometimes\n"), "databases[0].retry.policy"},
 		{"zero retry initial", mk("", "    retry:\n      initial: 0s\n"), "databases[0].retry.initial"},
 		{"negative retry max", mk("", "    retry:\n      max: -1s\n"), "databases[0].retry.max"},
@@ -146,6 +154,10 @@ func TestValidationAccepts(t *testing.T) {
 		{"same publication name in different databases", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/d1\", slot: s1, publication: p}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/d2\", slot: s2, publication: p}, sink: {type: stdout}}\n"},
+		{"name of 58 characters", "databases:\n  - {name: " + strings.Repeat("a", 58) + ", postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n"},
+		{"same slot on different unix sockets", "databases:\n" +
+			"  - {name: a, postgres: {url: \"postgres:///d?host=/run/a\", slot: s}, sink: {type: stdout}}\n" +
+			"  - {name: b, postgres: {url: \"postgres:///d?host=/run/b\", slot: s}, sink: {type: stdout}}\n"},
 		{"stdout sinks may repeat", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/a\"}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/b\"}, sink: {type: stdout}}\n"},
