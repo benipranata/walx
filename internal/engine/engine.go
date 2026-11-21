@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pglogrepl"
@@ -53,6 +54,8 @@ type Engine struct {
 	confirm func(lsn event.LSN)
 	empty   func(b event.Batch)
 
+	pending atomic.Int64 // batches queued or being delivered
+
 	sleep  func(ctx context.Context, d time.Duration) error // retry wait, a fake clock in tests
 	jitter func(d time.Duration) time.Duration
 }
@@ -75,11 +78,7 @@ func New(cfg Config) *Engine {
 	}
 	e.send = e.withPermanent(e.withRetry(cfg.Sink.Send))
 	e.confirm = func(lsn event.LSN) { cfg.Source.SetConfirmed(pglogrepl.LSN(lsn)) }
-	e.empty = func(b event.Batch) {
-		// Confirming an empty batch is the idle-advance task; until then it
-		// is neither sent nor confirmed.
-		e.log.Debug("empty batch not sent", "commit_lsn", b.CommitLSN.String(), "end_lsn", b.EndLSN.String())
-	}
+	e.empty = e.confirmEmpty
 	return e
 }
 
@@ -139,10 +138,17 @@ func (e *Engine) Run(ctx context.Context) error {
 // stops it taking from the Source; Standby keeps answering the server.
 func (e *Engine) read(ctx context.Context, queue chan<- event.Batch) error {
 	msgs := e.cfg.Source.Messages()
+	kas := e.cfg.Source.Keepalives()
 	for {
 		select {
 		case <-ctx.Done():
 			return nil
+		case lsn, ok := <-kas:
+			if !ok {
+				kas = nil
+				continue
+			}
+			e.keepalive(event.LSN(lsn))
 		case xld, ok := <-msgs:
 			if !ok {
 				return nil
@@ -154,6 +160,7 @@ func (e *Engine) read(ctx context.Context, queue chan<- event.Batch) error {
 			if b == nil {
 				continue
 			}
+			e.pending.Add(1)
 			select {
 			case queue <- *b:
 			case <-ctx.Done():
@@ -190,6 +197,7 @@ func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 			}
 			if len(b.Events) == 0 {
 				e.empty(b)
+				e.pending.Add(-1)
 				continue
 			}
 			if err := e.send(ctx, b); err != nil {
@@ -201,6 +209,7 @@ func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 				return fmt.Errorf("sink send: %w", err)
 			}
 			e.confirm(b.EndLSN)
+			e.pending.Add(-1)
 			e.log.Debug("batch delivered", "commit_lsn", b.CommitLSN.String(),
 				"end_lsn", b.EndLSN.String(), "events", len(b.Events))
 		}

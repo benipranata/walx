@@ -12,5 +12,9 @@ import (
 type Source interface {
 	Run(ctx context.Context) error
 	Messages() <-chan pglogrepl.XLogData
+	// Keepalives delivers the server WAL end of primary keepalives. When it
+	// yields a position, every message sent before it was already returned
+	// by Messages.
+	Keepalives() <-chan pglogrepl.LSN
 	SetConfirmed(lsn pglogrepl.LSN)
 }

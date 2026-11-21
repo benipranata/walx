@@ -26,13 +26,14 @@ func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 // fakeSource is a Source fed from the test.
 type fakeSource struct {
 	out       chan pglogrepl.XLogData
+	ka        chan pglogrepl.LSN
 	runErr    chan error
 	mu        sync.Mutex
 	confirmed []pglogrepl.LSN
 }
 
 func newFakeSource() *fakeSource {
-	return &fakeSource{out: make(chan pglogrepl.XLogData), runErr: make(chan error, 1)}
+	return &fakeSource{out: make(chan pglogrepl.XLogData), ka: make(chan pglogrepl.LSN, 1), runErr: make(chan error, 1)}
 }
 
 func (f *fakeSource) Run(ctx context.Context) error {
@@ -45,6 +46,8 @@ func (f *fakeSource) Run(ctx context.Context) error {
 }
 
 func (f *fakeSource) Messages() <-chan pglogrepl.XLogData { return f.out }
+
+func (f *fakeSource) Keepalives() <-chan pglogrepl.LSN { return f.ka }
 
 func (f *fakeSource) SetConfirmed(l pglogrepl.LSN) {
 	f.mu.Lock()
@@ -378,20 +381,6 @@ func TestLogFields(t *testing.T) {
 				}
 			}
 			require.True(t, found, "no %q line in %s", tt.wantMsg, out.String())
-		})
-	}
-}
-
-func TestEmptyBatchLog(t *testing.T) {
-	tests := []struct{ name string }{{name: "default hook logs at debug"}}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			var out syncBuffer
-			log := slog.New(slog.NewJSONHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
-			e := New(Config{Name: "a", Source: newFakeSource(), Sink: event.SinkFunc(nil), Logger: log})
-			e.empty(event.Batch{CommitLSN: 1, EndLSN: 2})
-			require.Contains(t, out.String(), `"msg":"empty batch not sent"`)
-			require.Contains(t, out.String(), `"end_lsn":"0/2"`)
 		})
 	}
 }

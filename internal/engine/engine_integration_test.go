@@ -53,7 +53,7 @@ type pipeline struct {
 	decoded func() int
 }
 
-func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink event.Sink, queue int) *pipeline {
+func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink event.Sink, queue int, filter Filter) *pipeline {
 	t.Helper()
 	conn := postgres.New(config.PostgresConfig{URL: url}, config.RetryConfig{}, nil)
 	t.Cleanup(func() { _ = conn.Close(ctx) })
@@ -66,7 +66,7 @@ func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink eve
 	require.NoError(t, err)
 
 	buf := postgres.NewTxBuffer("itest", postgres.NewRelations(), nil)
-	e := New(Config{Name: "itest", Source: sb, Buffer: buf, Sink: sink, QueueSize: queue})
+	e := New(Config{Name: "itest", Source: sb, Buffer: buf, Sink: sink, QueueSize: queue, Filter: filter})
 	var mu sync.Mutex
 	var n int
 	inner := e.decode
@@ -117,7 +117,7 @@ func TestEngineIntegration(t *testing.T) {
 	admin, err := pgx.Connect(ctx, url)
 	require.NoError(t, err)
 	defer admin.Close(ctx)
-	_, err = admin.Exec(ctx, `CREATE TABLE t (id int PRIMARY KEY); CREATE PUBLICATION p FOR TABLE t`)
+	_, err = admin.Exec(ctx, `CREATE TABLE t (id int PRIMARY KEY); CREATE TABLE ignored (id int PRIMARY KEY); CREATE PUBLICATION p FOR TABLE t`)
 	require.NoError(t, err)
 	setServerSetting(t, url, "wal_sender_timeout", "3s")
 
@@ -128,7 +128,7 @@ func TestEngineIntegration(t *testing.T) {
 		{name: "ordered batches and an advancing confirmed_flush_lsn", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			sink := &memSink{}
-			p := startPipeline(t, ctx, url, "s_order", sink, 4)
+			p := startPipeline(t, ctx, url, "s_order", sink, 4, nil)
 			start := slotFlush(t, ctx, admin, "s_order")
 			for i := 1; i <= 10; i++ {
 				_, err := admin.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+1000)
@@ -151,11 +151,55 @@ func TestEngineIntegration(t *testing.T) {
 			require.Greater(t, slotFlush(t, ctx, admin, "s_order"), start)
 			p.stop(t)
 		}},
+		{name: "a transaction on an ignored table moves confirmed_flush_lsn", run: func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			sink := &memSink{}
+			p := startPipeline(t, ctx, url, "s_ignored", sink, 4, nil)
+			before := slotFlush(t, ctx, admin, "s_ignored")
+			_, err := admin.Exec(ctx, `INSERT INTO ignored VALUES (1)`)
+			require.NoError(t, err)
+			var end string
+			require.NoError(t, admin.QueryRow(ctx, `SELECT pg_current_wal_lsn()::text`).Scan(&end))
+			want, err := pglogrepl.ParseLSN(end)
+			require.NoError(t, err)
+			require.Eventually(t, func() bool { return slotFlush(t, ctx, admin, "s_ignored") >= want },
+				15*time.Second, 100*time.Millisecond, "confirmed_flush_lsn stayed at %s", before)
+			require.Empty(t, sink.Batches())
+			p.stop(t)
+		}},
+		{name: "dropped deletes move confirmed_flush_lsn", run: func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			sink := &memSink{}
+			dropDeletes := func(b event.Batch) event.Batch {
+				var keep []*event.Event
+				for _, ev := range b.Events {
+					if ev.Op != event.OpDelete {
+						keep = append(keep, ev)
+					}
+				}
+				b.Events = keep
+				return b
+			}
+			_, err := admin.Exec(ctx, `INSERT INTO t VALUES (3001)`)
+			require.NoError(t, err)
+			p := startPipeline(t, ctx, url, "s_deletes", sink, 4, dropDeletes)
+			before := slotFlush(t, ctx, admin, "s_deletes")
+			_, err = admin.Exec(ctx, `DELETE FROM t WHERE id = 3001`)
+			require.NoError(t, err)
+			var end string
+			require.NoError(t, admin.QueryRow(ctx, `SELECT pg_current_wal_lsn()::text`).Scan(&end))
+			want, err := pglogrepl.ParseLSN(end)
+			require.NoError(t, err)
+			require.Eventually(t, func() bool { return slotFlush(t, ctx, admin, "s_deletes") >= want },
+				15*time.Second, 100*time.Millisecond, "confirmed_flush_lsn stayed at %s", before)
+			require.Empty(t, sink.Batches())
+			p.stop(t)
+		}},
 		{name: "a sink blocked past wal_sender_timeout keeps the connection and a bounded queue", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			const queue, rows = 2, 40
 			sink := &memSink{gate: make(chan struct{})}
-			p := startPipeline(t, ctx, url, "s_block", sink, queue)
+			p := startPipeline(t, ctx, url, "s_block", sink, queue, nil)
 			before := slotFlush(t, ctx, admin, "s_block")
 			for i := 1; i <= rows; i++ {
 				_, err := admin.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+2000)
