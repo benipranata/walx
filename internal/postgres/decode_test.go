@@ -1,11 +1,16 @@
 package postgres
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"os"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/benipranata/walx/internal/event"
 	"github.com/jackc/pglogrepl"
 	"github.com/stretchr/testify/require"
 )
@@ -51,6 +56,61 @@ func typesRow2() map[string]any {
 	return row
 }
 
+const toastSetup = `CREATE TABLE toasty (id int PRIMARY KEY, big text, note text)`
+
+// toastBigSQL builds about 9.6 kB of text that stays above the TOAST threshold
+// even compressed, so Postgres stores it out of line. toastBig is its Go twin.
+const toastBigSQL = `(SELECT string_agg(md5(g::text), '') FROM generate_series(1, 300) g)`
+
+const toastDML = `
+INSERT INTO toasty VALUES (1, ` + toastBigSQL + `, 'a');
+UPDATE toasty SET note = 'b' WHERE id = 1`
+
+// toastBig returns the value toastBigSQL produces.
+func toastBig() string {
+	var sb strings.Builder
+	for g := 1; g <= 300; g++ {
+		sum := md5.Sum([]byte(strconv.Itoa(g)))
+		sb.WriteString(hex.EncodeToString(sum[:]))
+	}
+	return sb.String()
+}
+
+func toastRows() []map[string]any {
+	return []map[string]any{
+		{"id": int64(1), "big": toastBig(), "note": "a"},
+		{"id": int64(1), "big": event.Unchanged, "note": "b"},
+	}
+}
+
+// decodeRows decodes the new tuple of every insert and update in msgs.
+func decodeRows(t *testing.T, msgs []pglogrepl.Message) []map[string]any {
+	t.Helper()
+	rels := NewRelations()
+	var got []map[string]any
+	for _, m := range msgs {
+		var id uint32
+		var tuple *pglogrepl.TupleData
+		switch m := m.(type) {
+		case *pglogrepl.RelationMessage:
+			rels.Set(m)
+			continue
+		case *pglogrepl.InsertMessage:
+			id, tuple = m.RelationID, m.Tuple
+		case *pglogrepl.UpdateMessage:
+			id, tuple = m.RelationID, m.NewTuple
+		default:
+			continue
+		}
+		rel, ok := rels.Get(id)
+		require.True(t, ok)
+		row, err := DecodeTuple(rel, tuple)
+		require.NoError(t, err)
+		got = append(got, row)
+	}
+	return got
+}
+
 func TestDecodeFixture(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -58,24 +118,11 @@ func TestDecodeFixture(t *testing.T) {
 		want    []map[string]any
 	}{
 		{name: "every mapped type and NULLs", fixture: "types", want: []map[string]any{typesRow1, typesRow2()}},
+		{name: "unchanged toast column", fixture: "toast", want: toastRows()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rels := NewRelations()
-			var got []map[string]any
-			for _, m := range loadFixture(t, tt.fixture) {
-				switch m := m.(type) {
-				case *pglogrepl.RelationMessage:
-					rels.Set(m)
-				case *pglogrepl.InsertMessage:
-					rel, ok := rels.Get(m.RelationID)
-					require.True(t, ok)
-					row, err := DecodeTuple(rel, m.Tuple)
-					require.NoError(t, err)
-					got = append(got, row)
-				}
-			}
-			require.Equal(t, tt.want, got)
+			require.Equal(t, tt.want, decodeRows(t, loadFixture(t, tt.fixture)))
 		})
 	}
 }
@@ -118,8 +165,6 @@ func TestDecodeTupleErrors(t *testing.T) {
 		tuple *pglogrepl.TupleData
 	}{
 		{name: "column count mismatch", rel: col(oidText), tuple: &pglogrepl.TupleData{}},
-		{name: "unchanged toast is not handled yet", rel: col(oidText),
-			tuple: &pglogrepl.TupleData{Columns: []*pglogrepl.TupleDataColumn{{DataType: 'u'}}}},
 		{name: "binary tuple data", rel: col(oidText),
 			tuple: &pglogrepl.TupleData{Columns: []*pglogrepl.TupleDataColumn{{DataType: 'b'}}}},
 		{name: "bad bool", rel: col(oidBool), tuple: text("x")},
@@ -133,6 +178,26 @@ func TestDecodeTupleErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := DecodeTuple(tt.rel, tt.tuple)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestDecodeTupleUnchanged(t *testing.T) {
+	tests := []struct {
+		name string
+		oid  uint32
+	}{
+		{name: "text", oid: oidText},
+		{name: "jsonb", oid: oidJSONB},
+		{name: "bytea", oid: oidBytea},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rel := &pglogrepl.RelationMessage{Columns: []*pglogrepl.RelationMessageColumn{{Name: "c", DataType: tt.oid}}}
+			tuple := &pglogrepl.TupleData{Columns: []*pglogrepl.TupleDataColumn{{DataType: pglogrepl.TupleDataTypeToast}}}
+			row, err := DecodeTuple(rel, tuple)
+			require.NoError(t, err)
+			require.Equal(t, map[string]any{"c": event.Unchanged}, row)
 		})
 	}
 }
@@ -173,6 +238,7 @@ func TestRecordFixtureIntegration(t *testing.T) {
 	}{
 		{name: "types", fixture: "types", setup: typesSetup, dml: typesDML,
 			want: []map[string]any{typesRow1, typesRow2()}},
+		{name: "large text column", fixture: "toast", setup: toastSetup, dml: toastDML, want: toastRows()},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -180,22 +246,52 @@ func TestRecordFixtureIntegration(t *testing.T) {
 			if os.Getenv("WALX_RECORD_FIXTURES") != "" {
 				writeFixture(t, tt.fixture, raw)
 			}
+			var msgs []pglogrepl.Message
+			for _, b := range raw {
+				m, err := pglogrepl.Parse(b)
+				require.NoError(t, err)
+				msgs = append(msgs, m)
+			}
+			require.Equal(t, tt.want, decodeRows(t, msgs))
+		})
+	}
+}
+
+// TestReplicaIdentityFullToastIntegration records what REPLICA IDENTITY FULL
+// puts in the old tuple when an update leaves a TOAST column untouched.
+func TestReplicaIdentityFullToastIntegration(t *testing.T) {
+	url := startPostgres(t)
+	tests := []struct {
+		name    string
+		wantOld map[string]any
+	}{
+		{name: "full", wantOld: map[string]any{"id": int64(1), "big": toastBig(), "note": "a"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw := recordFixture(t, isolatedDatabase(t, url),
+				toastSetup+`; ALTER TABLE toasty REPLICA IDENTITY FULL`, toastDML)
 			rels := NewRelations()
-			var got []map[string]any
+			var found bool
 			for _, b := range raw {
 				m, err := pglogrepl.Parse(b)
 				require.NoError(t, err)
 				switch m := m.(type) {
 				case *pglogrepl.RelationMessage:
 					rels.Set(m)
-				case *pglogrepl.InsertMessage:
+				case *pglogrepl.UpdateMessage:
 					rel, _ := rels.Get(m.RelationID)
-					row, err := DecodeTuple(rel, m.Tuple)
+					require.NotNil(t, m.OldTuple)
+					old, err := DecodeTuple(rel, m.OldTuple)
 					require.NoError(t, err)
-					got = append(got, row)
+					newRow, err := DecodeTuple(rel, m.NewTuple)
+					require.NoError(t, err)
+					require.Equal(t, event.Unchanged, newRow["big"])
+					require.Equal(t, tt.wantOld, old)
+					found = true
 				}
 			}
-			require.Equal(t, tt.want, got)
+			require.True(t, found)
 		})
 	}
 }

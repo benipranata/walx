@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/jackc/pglogrepl"
+
+	"github.com/benipranata/walx/internal/event"
 )
 
 // Type OIDs from pg_type that the decoder maps; any other OID decodes as a
@@ -64,7 +66,8 @@ func (r *Relations) Get(id uint32) (*pglogrepl.RelationMessage, bool) {
 // float32, float8 to float64, numeric and uuid to string, text types to
 // string, bytea to []byte, json and jsonb to the parsed value (numbers as
 // json.Number), date, timestamp and timestamptz to time.Time (timestamp
-// without zone is read as UTC), NULL to nil. Other types, and the values
+// without zone is read as UTC), NULL to nil, and an unchanged TOAST column
+// ('u'), whatever its type, to event.Unchanged. Other types, and the values
 // time.Time or float64 cannot hold (infinity, NaN, BC dates), stay strings.
 func DecodeTuple(rel *pglogrepl.RelationMessage, tuple *pglogrepl.TupleData) (map[string]any, error) {
 	if len(tuple.Columns) != len(rel.Columns) {
@@ -77,6 +80,8 @@ func DecodeTuple(rel *pglogrepl.RelationMessage, tuple *pglogrepl.TupleData) (ma
 		switch col.DataType {
 		case pglogrepl.TupleDataTypeNull:
 			row[rc.Name] = nil
+		case pglogrepl.TupleDataTypeToast:
+			row[rc.Name] = event.Unchanged
 		case pglogrepl.TupleDataTypeText:
 			v, err := decodeValue(rc.DataType, string(col.Data))
 			if err != nil {
