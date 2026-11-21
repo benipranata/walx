@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connection, T1.5 slot, publication and stream start) are implemented so far; the postgres integration tests have not yet run against a real Postgres.
+Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connection, T1.5 slot, publication and stream start, T1.6 standby writer) are implemented so far; the postgres integration tests have not yet run against a real Postgres.
 
 ## Architecture rules
 
@@ -19,6 +19,8 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - Config: database names match `^[a-z][a-z0-9_]*$` and slots `[a-z0-9_]{1,63}`, since the name feeds the default slot, publication and `Event.ID`. A config holds one YAML document and no null list items (yaml would drop them and shift error indexes).
 - Postgres: a replication=database walsender accepts plain SQL only over the simple protocol, so use `pgconn.Exec`, never parameterised `pgx` queries.
 - Postgres: after `StartReplication` fails, pglogrepl leaves `ReadyForQuery` unread; reconnect instead of reusing the connection. The slot can stay active briefly after a killed backend, so the engine treats `ErrSlotActive` as retryable on reconnect and fatal at first start.
+- Postgres: `pglogrepl.SendStandbyStatusUpdate` ignores its ctx and replaces a flush or apply LSN of 0 with the write position, so start `Standby` with the slot's confirmed LSN, never 0, or unhandled WAL is confirmed.
+- Postgres: pgconn is not safe for concurrent use; `Standby.Run` is the single goroutine that receives (with a deadline so the timer fires) and writes. `ReceiveMessage` after a timeout loses no data; copy `WALData`, since pgconn reuses its buffer.
 - Postgres: `FOR ALL TABLES` needs superuser, also on 18. With `publish_via_partition_root`, `pg_publication_tables` lists the root table. `auto_alter` never switches between `FOR ALL TABLES` and a table list.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 
