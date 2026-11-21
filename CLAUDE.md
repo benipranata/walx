@@ -37,6 +37,7 @@ Integration tests use testcontainers Postgres 18 with `wal_level=logical` (needs
 - Within a file: type, constructor, methods, then unexported helpers. Keep package docs in `doc.go` and tests in a matching `_test.go`.
 - Install dev tools as Go tools (`go get -tool`), not globally.
 - Testify: prefer `require` over `assert`.
+- Write every test table-driven, even with one case.
 - Preferred tools: testify, goldie, tack, mockery, task.
 
 ## Commit messages
