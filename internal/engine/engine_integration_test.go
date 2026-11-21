@@ -51,9 +51,10 @@ type pipeline struct {
 	done    chan error
 	cancel  context.CancelFunc
 	decoded func() int
+	conn    *postgres.Conn
 }
 
-func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink event.Sink, queue int, filter Filter) *pipeline {
+func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink event.Sink, queue int, filter Filter, opts ...func(*Engine)) *pipeline {
 	t.Helper()
 	conn := postgres.New(config.PostgresConfig{URL: url}, config.RetryConfig{}, nil)
 	t.Cleanup(func() { _ = conn.Close(ctx) })
@@ -79,8 +80,11 @@ func startPipeline(t *testing.T, ctx context.Context, url, slot string, sink eve
 		}
 		return b, err
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
 	rctx, cancel := context.WithCancel(ctx)
-	p := &pipeline{engine: e, standby: sb, cancel: cancel, done: make(chan error, 1), decoded: func() int {
+	p := &pipeline{engine: e, standby: sb, conn: conn, cancel: cancel, done: make(chan error, 1), decoded: func() int {
 		mu.Lock()
 		defer mu.Unlock()
 		return n
