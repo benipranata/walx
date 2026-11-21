@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1 and T3.7) and `internal/filter` op filtering (T4.1) exist; retry, permanent errors, idle advance, shutdown, supervisor and sinks are not started.
+Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1, T3.2 and T3.7) and `internal/filter` op filtering (T4.1) exist; permanent errors, idle advance, shutdown, supervisor and sinks are not started.
 
 ## Architecture rules
 
@@ -35,7 +35,7 @@ Status: milestones M1 (config, connection, slot, publication, stream start, stan
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 - Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.
 - Postgres: under REPLICA IDENTITY FULL the Relation message flags every column as key, so `DecodeDML` falls back to the whole row; the identity check (T4.5) must pass the primary key in its `keys` map.
-- Engine: `pglogrepl.Parse` panics on an empty payload, so `decodeMessage` guards `len(WALData)==0`. The `send`, `confirm`, `empty` and `decode` func fields on `Engine` are the seams for T3.2 to T3.6; extend them instead of rewiring `deliver`.
+- Engine: `pglogrepl.Parse` panics on an empty payload, so `decodeMessage` guards `len(WALData)==0`. The `send`, `confirm`, `empty` and `decode` func fields on `Engine` are the seams for T3.2 to T3.6; extend them instead of rewiring `deliver`. An empty retry policy behaves as `stop` in the engine; config defaults supply `forever`.
 - Tests: a fake must not close a channel a feeder goroutine may still send on (panic); close only from the sender or leave it open.
 - Postgres tests: `pg_stat_replication.application_name` is empty for walx; join `pg_replication_slots.active_pid = pg_stat_replication.pid` to find its walsender.
 
