@@ -15,6 +15,8 @@ Status: `internal/event` and `internal/config` are implemented so far.
 - Delivery is serial and in WAL order within one database; no ordering across databases. Fail fast: one pipeline stopping shuts the others down and exits non-zero.
 - Filters must not mutate shared events; copy first.
 - Config: yaml `Node.Decode` ignores `KnownFields`, so `internal/config/keys.go` rejects unknown keys itself, before defaults and decoding.
+- Config: YAML aliases and merge keys are rejected (they would skip env expansion and key checks). `${VAR}` expansion clears the `!!str` tag of changed plain scalars so bool and int fields work; quoted scalars stay strings. In YAML tests write `${VAR}` in block style, since `{` breaks flow mappings.
+- Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 
 ## Commands
 
