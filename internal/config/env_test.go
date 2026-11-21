@@ -82,3 +82,17 @@ func TestEnvExpansionInQuotedValueStaysString(t *testing.T) {
 	_, err := config.Parse([]byte(mk("      auto_create: \"${WALX_TEST_BOOL}\"\n", "")))
 	require.ErrorContains(t, err, "databases[0].postgres.auto_create")
 }
+
+func TestAliasesAreRejected(t *testing.T) {
+	_, err := config.Parse([]byte(`
+databases:
+  - name: a
+    postgres: {url: &u "postgres://u@h/d"}
+    sink: {type: stdout}
+  - name: b
+    postgres: {url: *u}
+    sink: {type: stdout}
+`))
+	require.ErrorContains(t, err, "databases[1].postgres.url")
+	require.ErrorContains(t, err, "aliases are not supported")
+}

@@ -41,8 +41,11 @@ func (l lineKeys) name(err error) error {
 
 // checkKeys reports every mapping key under n that t has no yaml field for,
 // and records where each key sits. Free-form maps are not descended into.
+// Aliases are rejected: they would skip env expansion and key checks.
 func checkKeys(n *yaml.Node, t reflect.Type, path string, lines lineKeys) (errs []error) {
 	switch {
+	case n.Kind == yaml.AliasNode:
+		errs = append(errs, fmt.Errorf("%s (line %d): YAML aliases are not supported", path, n.Line))
 	case n.Kind == yaml.MappingNode && t.Kind() == reflect.Struct:
 		fields := yamlFields(t)
 		for i := 0; i+1 < len(n.Content); i += 2 {
