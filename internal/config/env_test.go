@@ -44,8 +44,8 @@ databases:
 		},
 		{
 			name: "other dollars are left alone",
-			doc:  mk("      slot: a$b$\n", ""),
-			got:  func(c *config.Config) any { return c.Databases[0].Postgres.Slot },
+			doc:  mk("      publication: a$b$\n", ""),
+			got:  func(c *config.Config) any { return c.Databases[0].Postgres.Publication },
 			want: "a$b$",
 		},
 		{

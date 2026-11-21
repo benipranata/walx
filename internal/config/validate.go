@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -16,6 +17,16 @@ var (
 	retryPolicies   = []string{"forever", "max_attempts", "stop"}
 	permanentErrors = []string{"stop", "skip"}
 	ops             = []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate}
+)
+
+// maxIdentLen is the longest Postgres identifier, which also bounds slot names.
+const maxIdentLen = 63
+
+var (
+	// A name is embedded in Event.ID and the default slot and publication, so
+	// it is limited to what a slot name allows, minus upper case.
+	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
+	slotPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
 )
 
 type reporter func(key, format string, args ...any)
@@ -44,6 +55,8 @@ func (c *Config) validate() error {
 		switch {
 		case d.Name == "":
 			bad(key("name"), "required")
+		case !namePattern.MatchString(d.Name):
+			bad(key("name"), "must match %s, got %q", namePattern, d.Name)
 		case names[d.Name]:
 			bad(key("name"), "duplicate name %q", d.Name)
 		}
@@ -92,6 +105,13 @@ func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {
 	}
 	if p.MaxTxBytes <= 0 {
 		bad(key("postgres.max_tx_bytes"), "must be positive")
+	}
+	// Empty only for an unnamed entry, which is already reported.
+	if p.Slot != "" && (!slotPattern.MatchString(p.Slot) || len(p.Slot) > maxIdentLen) {
+		bad(key("postgres.slot"), "must be 1-%d characters of a-z, 0-9 and _, got %q", maxIdentLen, p.Slot)
+	}
+	if len(p.Publication) > maxIdentLen {
+		bad(key("postgres.publication"), "must be at most %d characters, got %q", maxIdentLen, p.Publication)
 	}
 }
 

@@ -2,6 +2,7 @@ package config_test
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -34,6 +35,13 @@ func TestValidationErrors(t *testing.T) {
 		{"unknown sink type", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: kafka}}\n", "databases[0].sink.type"},
 		{"missing sink", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}}\n", "databases[0].sink.type"},
 		{"file sink without path", "databases:\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: file}}\n", "databases[0].sink.path"},
+		{"name with a dash", "databases:\n  - {name: orders-db, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].name"},
+		{"name with upper case", "databases:\n  - {name: Orders, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].name"},
+		{"name starting with a digit", "databases:\n  - {name: 1db, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].name"},
+		{"name too long for the default slot", "databases:\n  - {name: " + strings.Repeat("a", 59) + ", postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].postgres.slot"},
+		{"explicit slot with invalid characters", mk("      slot: Bad-Slot\n", ""), "databases[0].postgres.slot"},
+		{"explicit slot too long", mk("      slot: "+strings.Repeat("s", 64)+"\n", ""), "databases[0].postgres.slot"},
+		{"publication too long", mk("      publication: "+strings.Repeat("p", 64)+"\n", ""), "databases[0].postgres.publication"},
 		{"zero max_tx_bytes", mk("      max_tx_bytes: 0\n", ""), "databases[0].postgres.max_tx_bytes"},
 		{"table without schema", mk("", "    tables:\n      - name: orders\n"), "databases[0].tables[0].name"},
 		{"table too many parts", mk("", "    tables:\n      - name: a.b.c\n"), "databases[0].tables[0].name"},
