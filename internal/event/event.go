@@ -22,9 +22,9 @@ type Event struct {
 }
 
 // Transition returns the value of col before and after the change. ok is
-// false when either row image or the column is missing. A value may be
-// Unchanged.
-func (e Event) Transition(col string) (from, to any, ok bool) {
+// false when either row image or the column is missing, so a delete or an
+// insert has no transition. A value may be Unchanged.
+func (e *Event) Transition(col string) (from, to any, ok bool) {
 	if e.Before == nil || e.After == nil {
 		return nil, nil, false
 	}
@@ -36,13 +36,13 @@ func (e Event) Transition(col string) (from, to any, ok bool) {
 	return from, to, true
 }
 
-// Changed reports whether col differs between Before and After. ok is false
-// when Transition has no answer. A col that is Unchanged on either side is
-// not known to have changed, so it reports false.
-func (e Event) Changed(col string) (changed, ok bool) {
+// Changed reports whether col differs between Before and After. It is false
+// when Transition has no answer, and when col is Unchanged on either side,
+// since that is not known to have changed.
+func (e *Event) Changed(col string) bool {
 	from, to, ok := e.Transition(col)
 	if !ok || from == Unchanged || to == Unchanged {
-		return false, ok
+		return false
 	}
-	return !reflect.DeepEqual(from, to), true
+	return !reflect.DeepEqual(from, to)
 }

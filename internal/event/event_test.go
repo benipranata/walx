@@ -58,11 +58,9 @@ func TestChangedAndTransition(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			e := event.Event{Before: tt.before, After: tt.after}
+			e := &event.Event{Before: tt.before, After: tt.after}
 
-			changed, ok := e.Changed(tt.col)
-			require.Equal(t, tt.wantOK, ok)
-			require.Equal(t, tt.wantChanged, changed)
+			require.Equal(t, tt.wantChanged, e.Changed(tt.col))
 
 			from, to, ok := e.Transition(tt.col)
 			require.Equal(t, tt.wantOK, ok)
