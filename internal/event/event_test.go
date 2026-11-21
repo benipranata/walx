@@ -51,3 +51,42 @@ func TestEventJSON(t *testing.T) {
 		"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}}
 	}`, string(b))
 }
+
+func TestChangedAndTransition(t *testing.T) {
+	u := event.Unchanged
+	tests := []struct {
+		name             string
+		before, after    map[string]any
+		col              string
+		wantChanged      bool
+		wantFrom, wantTo any
+		wantOK           bool
+	}{
+		{"insert has no before", nil, map[string]any{"a": 1}, "a", false, nil, nil, false},
+		{"delete has no after", map[string]any{"a": 1}, nil, "a", false, nil, nil, false},
+		{"update changed", map[string]any{"a": 1}, map[string]any{"a": 2}, "a", true, 1, 2, true},
+		{"same value", map[string]any{"a": 1}, map[string]any{"a": 1}, "a", false, 1, 1, true},
+		{"nil to value", map[string]any{"a": nil}, map[string]any{"a": 1}, "a", true, nil, 1, true},
+		{"uncomparable equal", map[string]any{"a": []any{1}}, map[string]any{"a": []any{1}}, "a", false, []any{1}, []any{1}, true},
+		{"uncomparable differ", map[string]any{"a": map[string]any{"k": 1}}, map[string]any{"a": map[string]any{"k": 2}}, "a", true, map[string]any{"k": 1}, map[string]any{"k": 2}, true},
+		{"missing in before", map[string]any{"b": 1}, map[string]any{"a": 1}, "a", false, nil, nil, false},
+		{"missing in after", map[string]any{"a": 1}, map[string]any{"b": 1}, "a", false, nil, nil, false},
+		{"sentinel in before", map[string]any{"a": u}, map[string]any{"a": 1}, "a", false, u, 1, true},
+		{"sentinel in after", map[string]any{"a": 1}, map[string]any{"a": u}, "a", false, 1, u, true},
+		{"sentinel in both", map[string]any{"a": u}, map[string]any{"a": u}, "a", false, u, u, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := event.Event{Before: tt.before, After: tt.after}
+
+			changed, ok := e.Changed(tt.col)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.wantChanged, changed)
+
+			from, to, ok := e.Transition(tt.col)
+			require.Equal(t, tt.wantOK, ok)
+			require.Equal(t, tt.wantFrom, from)
+			require.Equal(t, tt.wantTo, to)
+		})
+	}
+}
