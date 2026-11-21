@@ -14,6 +14,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	switch args[0] {
+	case "help", "-h", "--help":
+		fmt.Fprintln(stdout, usage)
+		return 0
 	case "snapshot":
 		return runSnapshot(args[1:], stdout, stderr)
 	default:
