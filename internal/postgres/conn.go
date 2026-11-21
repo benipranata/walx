@@ -14,9 +14,9 @@ import (
 )
 
 const (
-	minVersionNum  = 180000
-	defaultInitial = 100 * time.Millisecond
-	defaultMax     = 30 * time.Second
+	minMajorVersion = 18
+	defaultInitial  = 100 * time.Millisecond
+	defaultMax      = 30 * time.Second
 )
 
 // Conn is a logical replication connection (replication=database) to one
@@ -56,7 +56,7 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 	if err != nil {
 		return zero, fmt.Errorf("connect: %w", err)
 	}
-	if err := checkVersion(pg.ParameterStatus("server_version_num")); err != nil {
+	if err := checkVersion(pg.ParameterStatus("server_version")); err != nil {
 		_ = pg.Close(context.WithoutCancel(ctx))
 		return zero, err
 	}
@@ -118,10 +118,19 @@ func replicationConfig(url string) (*pgconn.Config, error) {
 	return cfg, nil
 }
 
-func checkVersion(num string) error {
-	n, err := strconv.Atoi(num)
-	if err != nil || n < minVersionNum {
-		return fmt.Errorf("postgres 18 or later required, server_version_num=%q", num)
+// checkVersion reads the major number from server_version, the only version
+// the server reports at startup (server_version_num is not a reported GUC).
+func checkVersion(version string) error {
+	digits := version
+	for i, r := range version {
+		if r < '0' || r > '9' {
+			digits = version[:i]
+			break
+		}
+	}
+	n, err := strconv.Atoi(digits)
+	if err != nil || n < minMajorVersion {
+		return fmt.Errorf("postgres 18 or later required, server_version=%q", version)
 	}
 	return nil
 }

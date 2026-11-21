@@ -42,19 +42,21 @@ func TestReplicationConfig(t *testing.T) {
 func TestCheckVersion(t *testing.T) {
 	tests := []struct {
 		name    string
-		num     string
+		version string
 		wantErr bool
 	}{
-		{name: "18.0", num: "180000"},
-		{name: "18.2", num: "180002"},
-		{name: "19", num: "190000"},
-		{name: "17", num: "170005", wantErr: true},
-		{name: "empty", num: "", wantErr: true},
-		{name: "garbage", num: "abc", wantErr: true},
+		{name: "18.0", version: "18.0"},
+		{name: "18.2 with distro suffix", version: "18.2 (Debian 18.2-1.pgdg120+1)"},
+		{name: "18 beta", version: "18beta1"},
+		{name: "19", version: "19.1"},
+		{name: "17", version: "17.5", wantErr: true},
+		{name: "9.6", version: "9.6.24", wantErr: true},
+		{name: "empty", version: "", wantErr: true},
+		{name: "garbage", version: "abc", wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := checkVersion(tt.num)
+			err := checkVersion(tt.version)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
