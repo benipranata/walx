@@ -86,3 +86,11 @@ func TestValidationAccepts(t *testing.T) {
 		})
 	}
 }
+
+func TestUnnamedEntriesDoNotReportSlotDuplicates(t *testing.T) {
+	_, err := config.Parse([]byte("databases:\n" +
+		"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n" +
+		"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n"))
+	require.ErrorContains(t, err, "databases[1].name")
+	require.NotContains(t, err.Error(), "slot")
+}

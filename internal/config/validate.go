@@ -50,9 +50,12 @@ func (c *Config) validate() error {
 		names[d.Name] = true
 
 		validatePostgres(d.Postgres, key, bad)
-		if id := [2]string{d.Postgres.URL, d.Postgres.Slot}; d.Postgres.URL != "" && slots[id] {
-			bad(key("postgres.slot"), "slot %q is already used with the same url", d.Postgres.Slot)
-		} else {
+		// The slot defaults from the name, so it is empty only for an unnamed
+		// entry, which is already reported.
+		if id := [2]string{d.Postgres.URL, d.Postgres.Slot}; d.Postgres.URL != "" && d.Postgres.Slot != "" {
+			if slots[id] {
+				bad(key("postgres.slot"), "slot %q is already used with the same url", d.Postgres.Slot)
+			}
 			slots[id] = true
 		}
 
