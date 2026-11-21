@@ -33,6 +33,7 @@ func TestParse(t *testing.T) {
 				require.True(t, d.Postgres.AutoReplicaIdentity)
 				require.False(t, d.Postgres.AutoAlter)
 				require.Equal(t, config.ByteSize(256<<20), d.Postgres.MaxTxBytes)
+				require.Zero(t, d.Postgres.MaxTxEvents)
 				require.Equal(t, config.RetryConfig{
 					Policy:  "forever",
 					Initial: 100 * time.Millisecond,

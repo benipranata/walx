@@ -142,6 +142,9 @@ func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {
 	if p.MaxTxBytes <= 0 {
 		bad(key("postgres.max_tx_bytes"), "must be positive")
 	}
+	if p.MaxTxEvents < 0 {
+		bad(key("postgres.max_tx_events"), "must not be negative")
+	}
 	// Empty only for an unnamed entry, which is already reported.
 	if p.Slot != "" && (!slotPattern.MatchString(p.Slot) || len(p.Slot) > maxIdentLen) {
 		bad(key("postgres.slot"), "must be 1-%d characters of a-z, 0-9 and _, got %q", maxIdentLen, p.Slot)

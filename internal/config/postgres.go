@@ -8,5 +8,6 @@ type PostgresConfig struct {
 	AutoCreate          bool     `yaml:"auto_create"`           // create the slot and publication
 	AutoReplicaIdentity bool     `yaml:"auto_replica_identity"` // set REPLICA IDENTITY FULL
 	AutoAlter           bool     `yaml:"auto_alter"`            // keep the publication in step with tables
-	MaxTxBytes          ByteSize `yaml:"max_tx_bytes"`
+	MaxTxBytes          ByteSize `yaml:"max_tx_bytes"`          // raw tuple bytes of one transaction
+	MaxTxEvents         int      `yaml:"max_tx_events"`         // 0 means unlimited
 }

@@ -56,6 +56,7 @@ func TestValidationErrors(t *testing.T) {
 		{"explicit slot starting with a digit", mk("      slot: 1abc\n", ""), "databases[0].postgres.slot"},
 		{"explicit slot too long", mk("      slot: "+strings.Repeat("s", 64)+"\n", ""), "databases[0].postgres.slot"},
 		{"publication too long", mk("      publication: "+strings.Repeat("p", 64)+"\n", ""), "databases[0].postgres.publication"},
+		{"negative max_tx_events", mk("      max_tx_events: -1\n", ""), "databases[0].postgres.max_tx_events"},
 		{"zero max_tx_bytes", mk("      max_tx_bytes: 0\n", ""), "databases[0].postgres.max_tx_bytes"},
 		{"table without schema", mk("", "    tables:\n      - name: orders\n"), "databases[0].tables[0].name"},
 		{"table too many parts", mk("", "    tables:\n      - name: a.b.c\n"), "databases[0].tables[0].name"},
