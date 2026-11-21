@@ -110,8 +110,9 @@ func TestStandbyRun(t *testing.T) {
 			wantErr: func(t *testing.T, err error) { require.ErrorIs(t, err, context.Canceled) },
 		},
 		{
-			name: "keepalive with reply request answers immediately",
-			in:   []recv{{msg: keepalive(true)}},
+			name:     "keepalive with reply request answers immediately",
+			in:       []recv{{msg: keepalive(true)}},
+			interval: time.Hour,
 			wait: func(t *testing.T, s *Standby, f *fakeConn) {
 				require.Eventually(t, func() bool { return len(f.statuses()) == 1 }, time.Second, time.Millisecond)
 			},
@@ -218,6 +219,7 @@ func TestStandbyRun(t *testing.T) {
 				{msg: &pgproto3.NoticeResponse{SeverityUnlocalized: "NOTICE", Code: "55000", Message: "info"}},
 				{msg: keepalive(true)},
 			},
+			interval: time.Hour,
 			wait: func(t *testing.T, s *Standby, f *fakeConn) {
 				require.Eventually(t, func() bool { return len(f.statuses()) >= 1 }, time.Second, time.Millisecond)
 			},
@@ -231,6 +233,7 @@ func TestStandbyRun(t *testing.T) {
 				{msg: &pgproto3.NoticeResponse{}},
 				{msg: keepalive(true)},
 			},
+			interval: time.Hour,
 			wait: func(t *testing.T, s *Standby, f *fakeConn) {
 				require.Eventually(t, func() bool { return len(f.statuses()) == 1 }, time.Second, time.Millisecond)
 			},
