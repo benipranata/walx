@@ -99,6 +99,11 @@ func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {
 	if p.URL == "" {
 		bad(key("postgres.url"), "required")
 	} else if u, err := url.Parse(p.URL); err != nil {
+		// url.Error embeds the whole URL, password included.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
 		bad(key("postgres.url"), "not a valid URL: %v", err)
 	} else if u.Scheme != "postgres" && u.Scheme != "postgresql" {
 		bad(key("postgres.url"), "scheme must be postgres or postgresql")

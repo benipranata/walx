@@ -92,6 +92,18 @@ func TestValidationReporting(t *testing.T) {
 			contains:    []string{"databases[1].name"},
 			notContains: []string{"slot"},
 		},
+		{
+			name:        "invalid escape in url does not echo the password",
+			doc:         "databases:\n  - {name: a, postgres: {url: \"postgres://u:s3cret%zz@h/d\"}, sink: {type: stdout}}\n",
+			contains:    []string{"databases[0].postgres.url", "invalid URL escape"},
+			notContains: []string{"s3cret"},
+		},
+		{
+			name:        "space in url does not echo the password",
+			doc:         "databases:\n  - {name: a, postgres: {url: \"postgres://u:s3 cret@h:bad/d\"}, sink: {type: stdout}}\n",
+			contains:    []string{"databases[0].postgres.url"},
+			notContains: []string{"s3 cret", "s3cret"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
