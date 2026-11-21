@@ -16,6 +16,7 @@ Status: `internal/event` and `internal/config` are implemented so far.
 - Filters must not mutate shared events; copy first.
 - Config: yaml `Node.Decode` ignores `KnownFields`, so `internal/config/keys.go` rejects unknown keys itself, before defaults and decoding.
 - Config: YAML aliases and merge keys are rejected (they would skip env expansion and key checks). `${VAR}` expansion clears the `!!str` tag of changed plain scalars so bool and int fields work; quoted scalars stay strings. In YAML tests write `${VAR}` in block style, since `{` breaks flow mappings.
+- Config: database names match `^[a-z][a-z0-9_]*$` and slots `[a-z0-9_]{1,63}`, since the name feeds the default slot, publication and `Event.ID`. A config holds one YAML document and no null list items (yaml would drop them and shift error indexes).
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 
 ## Commands
