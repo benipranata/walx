@@ -68,3 +68,17 @@ func TestEnvExpansionInLists(t *testing.T) {
 	_, err := config.Parse([]byte(mk("", "    tables:\n      - name: public.t\n        drop_columns: [\"${WALX_TEST_UNSET}\"]\n")))
 	require.ErrorContains(t, err, "databases[0].tables[0].drop_columns[0]")
 }
+
+func TestEnvExpansionInTypedFields(t *testing.T) {
+	t.Setenv("WALX_TEST_BOOL", "false")
+	t.Setenv("WALX_TEST_INT", "5")
+	cfg := mustParse(t, mk("      auto_create: ${WALX_TEST_BOOL}\n", "    retry:\n      policy: max_attempts\n      max_attempts: ${WALX_TEST_INT}\n"))
+	require.False(t, cfg.Databases[0].Postgres.AutoCreate)
+	require.Equal(t, 5, cfg.Databases[0].Retry.MaxAttempts)
+}
+
+func TestEnvExpansionInQuotedValueStaysString(t *testing.T) {
+	t.Setenv("WALX_TEST_BOOL", "false")
+	_, err := config.Parse([]byte(mk("      auto_create: \"${WALX_TEST_BOOL}\"\n", "")))
+	require.ErrorContains(t, err, "databases[0].postgres.auto_create")
+}

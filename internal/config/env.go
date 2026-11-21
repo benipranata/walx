@@ -15,6 +15,7 @@ var envRef = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 func expandEnv(n *yaml.Node, path string) (errs []error) {
 	switch n.Kind {
 	case yaml.ScalarNode:
+		before := n.Value
 		n.Value = envRef.ReplaceAllStringFunc(n.Value, func(ref string) string {
 			name := envRef.FindStringSubmatch(ref)[1]
 			v, ok := os.LookupEnv(name)
@@ -23,6 +24,12 @@ func expandEnv(n *yaml.Node, path string) (errs []error) {
 			}
 			return v
 		})
+		// A plain scalar was tagged !!str only because "${X}" is not a bool or
+		// int; clear the tag so yaml resolves the substituted value. Quoted
+		// scalars stay strings.
+		if n.Value != before && n.Style == 0 {
+			n.Tag = ""
+		}
 	case yaml.MappingNode:
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			errs = append(errs, expandEnv(n.Content[i+1], joinKey(path, n.Content[i].Value))...)
