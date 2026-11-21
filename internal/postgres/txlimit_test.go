@@ -64,3 +64,26 @@ func TestTxBufferLimits(t *testing.T) {
 		})
 	}
 }
+
+func TestTupleBytes(t *testing.T) {
+	col := func(s string) *pglogrepl.TupleDataColumn {
+		return &pglogrepl.TupleDataColumn{DataType: pglogrepl.TupleDataTypeText, Data: []byte(s)}
+	}
+	tests := []struct {
+		name string
+		msg  pglogrepl.Message
+		want int64
+	}{
+		{"delete with old tuple", &pglogrepl.DeleteMessage{OldTuple: &pglogrepl.TupleData{Columns: []*pglogrepl.TupleDataColumn{col("abc"), nil, col("de")}}}, 5},
+		{"delete with nil tuple", &pglogrepl.DeleteMessage{}, 0},
+		{"insert with nil tuple", &pglogrepl.InsertMessage{}, 0},
+		{"update with nil tuples", &pglogrepl.UpdateMessage{}, 0},
+		{"unrelated message", &pglogrepl.CommitMessage{}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tupleBytes(tt.msg))
+		})
+	}
+	require.Zero(t, columnBytes(nil))
+}

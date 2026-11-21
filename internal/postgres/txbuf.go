@@ -40,6 +40,12 @@ func NewTxBuffer(name string, rels *Relations, keys map[string][]string, opts ..
 	return b
 }
 
+// Reset drops the open transaction and keeps the limits, for use when the
+// stream restarts and the transaction will be redelivered from its Begin.
+func (b *TxBuffer) Reset() {
+	b.tx = nil
+}
+
 // Push feeds one pgoutput message. walStart is the WAL position of the
 // message, stored as Event.LSN. It returns a Batch when msg is a Commit, even
 // for a transaction without events, and nil otherwise. Events get

@@ -259,3 +259,37 @@ func TestTxBufferReplayIntegration(t *testing.T) {
 	require.Equal(t, fmt.Sprintf("main-%s-3", first[1].CommitLSN), first[1].Events[2].ID)
 	require.Less(t, first[0].CommitLSN, first[1].CommitLSN)
 }
+
+func TestResetClearsState(t *testing.T) {
+	tests := []struct {
+		name string
+	}{{"open transaction and relations"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rels := NewRelations()
+			b := NewTxBuffer("db", rels, nil, WithTxLimits(TxLimits{MaxEvents: 1}))
+			push(t, b, txRelation(), txBegin(1), txInsert("1"))
+			_, ok := rels.Get(1)
+			require.True(t, ok)
+
+			b.Reset()
+			rels.Reset()
+			_, ok = rels.Get(1)
+			require.False(t, ok)
+
+			_, err := b.Push(txBegin(2), 0)
+			require.NoError(t, err)
+
+			// The caps survive a reset.
+			b.Reset()
+			rels.Set(txRelation())
+			_, err = b.Push(txBegin(3), 0)
+			require.NoError(t, err)
+			_, err = b.Push(txInsert("1"), 0)
+			require.NoError(t, err)
+			_, err = b.Push(txInsert("2"), 0)
+			var tooLarge *TxTooLargeError
+			require.ErrorAs(t, err, &tooLarge)
+		})
+	}
+}

@@ -7,7 +7,8 @@ import "github.com/jackc/pglogrepl"
 type TxLimits struct {
 	// MaxBytes caps the raw tuple bytes of the DML messages (every column
 	// value of the new and old tuples). Row framing and metadata are not
-	// counted, which keeps the measure deterministic and cheap.
+	// counted, which keeps the measure deterministic and cheap. It is not a
+	// memory limit: decoded events take more memory than the raw bytes.
 	MaxBytes int64
 	// MaxEvents caps the events of the raw transaction, before filters.
 	MaxEvents int64

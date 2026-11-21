@@ -55,6 +55,12 @@ func (r *Relations) Set(rel *pglogrepl.RelationMessage) {
 	r.byID[rel.RelationID] = rel
 }
 
+// Reset drops every cached Relation, for use when the stream restarts and
+// Postgres re-sends them.
+func (r *Relations) Reset() {
+	clear(r.byID)
+}
+
 // Get returns the cached Relation for id.
 func (r *Relations) Get(id uint32) (*pglogrepl.RelationMessage, bool) {
 	rel, ok := r.byID[id]
