@@ -193,6 +193,8 @@ func TestParseErrors(t *testing.T) {
 		{"empty document", "", "expected a YAML mapping at the top level"},
 		{"only a comment", "# only a comment\n", "expected a YAML mapping at the top level"},
 		{"top level is a list", "- a\n- b\n", "expected a YAML mapping at the top level"},
+		{"second document", mk("", "") + "---\ndatabases: []\n", "only one YAML document"},
+		{"malformed second document", mk("", "") + "---\ndatabases: [\n", "did not find expected node content"},
 		{"syntax error", "databases: [\n", "did not find expected node content"},
 	}
 	for _, tt := range tests {
