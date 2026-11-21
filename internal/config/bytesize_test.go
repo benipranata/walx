@@ -33,15 +33,35 @@ func TestByteSize(t *testing.T) {
 }
 
 func TestByteSizeInvalid(t *testing.T) {
-	for _, in := range []string{"abc", "MiB", "1XiB", "1.5MiB", "-1MiB", "[1]", "99999999999TiB"} {
-		t.Run(in, func(t *testing.T) {
-			_, err := config.Parse([]byte(mk("      max_tx_bytes: "+in+"\n", "")))
+	tests := []struct{ name, in string }{
+		{"not a number", "abc"},
+		{"unit only", "MiB"},
+		{"unknown unit", "1XiB"},
+		{"fraction", "1.5MiB"},
+		{"negative", "-1MiB"},
+		{"sequence", "[1]"},
+		{"overflow", "99999999999TiB"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(mk("      max_tx_bytes: "+tt.in+"\n", "")))
 			require.ErrorContains(t, err, "max_tx_bytes")
 		})
 	}
 }
 
 func TestByteSizeString(t *testing.T) {
-	require.Equal(t, "256MiB", config.ByteSize(256<<20).String())
-	require.Equal(t, "1500B", config.ByteSize(1500).String())
+	tests := []struct {
+		name string
+		in   config.ByteSize
+		want string
+	}{
+		{"binary unit", 256 << 20, "256MiB"},
+		{"plain bytes", 1500, "1500B"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.in.String())
+		})
+	}
 }

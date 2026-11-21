@@ -60,10 +60,39 @@ func TestValidationErrors(t *testing.T) {
 	}
 }
 
-func TestValidationReportsEveryProblem(t *testing.T) {
-	_, err := config.Parse([]byte(mk("", "    on_permanent_error: x\n    retry: {policy: y}\n")))
-	require.ErrorContains(t, err, "on_permanent_error")
-	require.ErrorContains(t, err, "retry.policy")
+func TestValidationReporting(t *testing.T) {
+	tests := []struct {
+		name        string
+		doc         string
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:     "every problem is reported",
+			doc:      mk("", "    on_permanent_error: x\n    retry: {policy: y}\n"),
+			contains: []string{"on_permanent_error", "retry.policy"},
+		},
+		{
+			name: "unnamed entries do not report slot duplicates",
+			doc: "databases:\n" +
+				"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n" +
+				"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n",
+			contains:    []string{"databases[1].name"},
+			notContains: []string{"slot"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.doc))
+			require.Error(t, err)
+			for _, want := range tt.contains {
+				require.ErrorContains(t, err, want)
+			}
+			for _, not := range tt.notContains {
+				require.NotContains(t, err.Error(), not)
+			}
+		})
+	}
 }
 
 func TestValidationAccepts(t *testing.T) {
@@ -85,12 +114,4 @@ func TestValidationAccepts(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
-}
-
-func TestUnnamedEntriesDoNotReportSlotDuplicates(t *testing.T) {
-	_, err := config.Parse([]byte("databases:\n" +
-		"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n" +
-		"  - {postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n"))
-	require.ErrorContains(t, err, "databases[1].name")
-	require.NotContains(t, err.Error(), "slot")
 }

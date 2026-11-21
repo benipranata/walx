@@ -29,20 +29,56 @@ func TestUnknownKeys(t *testing.T) {
 	}
 }
 
-func TestUnknownKeysAreAllReported(t *testing.T) {
-	_, err := config.Parse([]byte(mk("      a: 1\n", "    b: 2\n")))
-	require.ErrorContains(t, err, "postgres.a")
-	require.ErrorContains(t, err, "databases[0].b")
+func TestKeyErrorReporting(t *testing.T) {
+	tests := []struct {
+		name        string
+		doc         string
+		contains    []string
+		notContains []string
+	}{
+		{
+			name:     "every unknown key is reported",
+			doc:      mk("      a: 1\n", "    b: 2\n"),
+			contains: []string{"postgres.a", "databases[0].b"},
+		},
+		{
+			name: "a decode error on a shared line does not guess the key",
+			doc: "databases:\n" +
+				"  - {name: a, name: b, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n",
+			contains:    []string{"line 2"},
+			notContains: []string{"databases[0].sink.type"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(tt.doc))
+			require.Error(t, err)
+			for _, want := range tt.contains {
+				require.ErrorContains(t, err, want)
+			}
+			for _, not := range tt.notContains {
+				require.NotContains(t, err.Error(), not)
+			}
+		})
+	}
 }
 
 func TestFreeFormWhereKeysAreNotChecked(t *testing.T) {
-	cfg := mustParse(t, mk("", "    tables:\n      - name: public.t\n        where: {anything: 1}\n"))
-	require.Equal(t, map[string]any{"anything": 1}, cfg.Databases[0].Tables[0].Where)
-}
-
-func TestDecodeErrorOnSharedLineDoesNotGuessTheKey(t *testing.T) {
-	_, err := config.Parse([]byte("databases:\n" +
-		"  - {name: a, name: b, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n"))
-	require.ErrorContains(t, err, "line 2")
-	require.NotContains(t, err.Error(), "databases[0].sink.type")
+	tests := []struct {
+		name string
+		doc  string
+		want map[string]any
+	}{
+		{
+			"arbitrary keys",
+			mk("", "    tables:\n      - name: public.t\n        where: {anything: 1}\n"),
+			map[string]any{"anything": 1},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, tt.doc)
+			require.Equal(t, tt.want, cfg.Databases[0].Tables[0].Where)
+		})
+	}
 }

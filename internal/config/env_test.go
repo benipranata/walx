@@ -9,82 +9,122 @@ import (
 )
 
 func TestEnvExpansion(t *testing.T) {
-	t.Setenv("PGHOST", "db.internal")
-	t.Setenv("PGDB", "orders")
-	cfg := mustParse(t, `
+	const plain = `
+databases:
+  - name: ${WALX_TEST_NAME}
+    postgres: {url: "postgres://u@h/db"}
+    sink: {type: stdout}
+`
+	tests := []struct {
+		name string
+		env  map[string]string
+		doc  string
+		got  func(cfg *config.Config) any
+		want any
+	}{
+		{
+			name: "inside a url",
+			env:  map[string]string{"PGHOST": "db.internal", "PGDB": "orders"},
+			doc: `
 databases:
   - name: a
     postgres:
       url: postgres://u@${PGHOST}/${PGDB}
     sink: {type: stdout}
-`)
-	require.Equal(t, "postgres://u@db.internal/orders", cfg.Databases[0].Postgres.URL)
+`,
+			got:  func(c *config.Config) any { return c.Databases[0].Postgres.URL },
+			want: "postgres://u@db.internal/orders",
+		},
+		{
+			name: "set but empty is allowed",
+			env:  map[string]string{"WALX_TEST_EMPTY": ""},
+			doc:  mk("      slot: x${WALX_TEST_EMPTY}\n", ""),
+			got:  func(c *config.Config) any { return c.Databases[0].Postgres.Slot },
+			want: "x",
+		},
+		{
+			name: "other dollars are left alone",
+			doc:  mk("      slot: a$b$\n", ""),
+			got:  func(c *config.Config) any { return c.Databases[0].Postgres.Slot },
+			want: "a$b$",
+		},
+		{
+			name: "comments are ignored",
+			doc:  mk("", "    # uses ${WALX_TEST_UNSET}\n"),
+			got:  func(c *config.Config) any { return c.Databases[0].Name },
+			want: "a",
+		},
+		{
+			name: "expanded value is not reinterpreted in a string field",
+			env:  map[string]string{"WALX_TEST_NAME": "true"},
+			doc:  plain,
+			got:  func(c *config.Config) any { return c.Databases[0].Name },
+			want: "true",
+		},
+		{
+			name: "inside a list",
+			env:  map[string]string{"WALX_TEST_COL": "raw"},
+			doc:  mk("", "    tables:\n      - name: public.t\n        drop_columns: [\"${WALX_TEST_COL}\"]\n"),
+			got:  func(c *config.Config) any { return c.Databases[0].Tables[0].DropColumns },
+			want: []string{"raw"},
+		},
+		{
+			name: "bool field",
+			env:  map[string]string{"WALX_TEST_BOOL": "false"},
+			doc:  mk("      auto_create: ${WALX_TEST_BOOL}\n", ""),
+			got:  func(c *config.Config) any { return c.Databases[0].Postgres.AutoCreate },
+			want: false,
+		},
+		{
+			name: "int field",
+			env:  map[string]string{"WALX_TEST_INT": "5"},
+			doc:  mk("", "    retry:\n      policy: max_attempts\n      max_attempts: ${WALX_TEST_INT}\n"),
+			got:  func(c *config.Config) any { return c.Databases[0].Retry.MaxAttempts },
+			want: 5,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			require.Equal(t, tt.want, tt.got(mustParse(t, tt.doc)))
+		})
+	}
 }
 
-func TestEnvUnsetIsAnError(t *testing.T) {
-	_, err := config.Parse([]byte(`
+func TestEnvErrors(t *testing.T) {
+	tests := []struct {
+		name  string
+		env   map[string]string
+		doc   string
+		wants []string
+	}{
+		{
+			name: "unset variable",
+			doc: `
 databases:
   - name: a
     postgres:
       url: ${WALX_TEST_UNSET}
     sink: {type: stdout}
-`))
-	require.ErrorContains(t, err, "WALX_TEST_UNSET")
-	require.ErrorContains(t, err, "databases[0].postgres.url")
-}
-
-func TestEnvSetButEmptyIsAllowed(t *testing.T) {
-	t.Setenv("WALX_TEST_EMPTY", "")
-	cfg := mustParse(t, mk("      slot: x${WALX_TEST_EMPTY}\n", ""))
-	require.Equal(t, "x", cfg.Databases[0].Postgres.Slot)
-}
-
-func TestEnvLeavesOtherDollarsAlone(t *testing.T) {
-	cfg := mustParse(t, mk("      slot: a$b$\n", ""))
-	require.Equal(t, "a$b$", cfg.Databases[0].Postgres.Slot)
-}
-
-func TestEnvIgnoresCommentsAndKeys(t *testing.T) {
-	cfg := mustParse(t, mk("", "    # uses ${WALX_TEST_UNSET}\n"))
-	require.Equal(t, "a", cfg.Databases[0].Name)
-}
-
-func TestEnvExpandedValueIsNotReinterpreted(t *testing.T) {
-	t.Setenv("WALX_TEST_NAME", "true")
-	cfg := mustParse(t, `
-databases:
-  - name: ${WALX_TEST_NAME}
-    postgres: {url: "postgres://u@h/db"}
-    sink: {type: stdout}
-`)
-	require.Equal(t, "true", cfg.Databases[0].Name)
-}
-
-func TestEnvExpansionInLists(t *testing.T) {
-	t.Setenv("WALX_TEST_COL", "raw")
-	cfg := mustParse(t, mk("", "    tables:\n      - name: public.t\n        drop_columns: [\"${WALX_TEST_COL}\"]\n"))
-	require.Equal(t, []string{"raw"}, cfg.Databases[0].Tables[0].DropColumns)
-
-	_, err := config.Parse([]byte(mk("", "    tables:\n      - name: public.t\n        drop_columns: [\"${WALX_TEST_UNSET}\"]\n")))
-	require.ErrorContains(t, err, "databases[0].tables[0].drop_columns[0]")
-}
-
-func TestEnvExpansionInTypedFields(t *testing.T) {
-	t.Setenv("WALX_TEST_BOOL", "false")
-	t.Setenv("WALX_TEST_INT", "5")
-	cfg := mustParse(t, mk("      auto_create: ${WALX_TEST_BOOL}\n", "    retry:\n      policy: max_attempts\n      max_attempts: ${WALX_TEST_INT}\n"))
-	require.False(t, cfg.Databases[0].Postgres.AutoCreate)
-	require.Equal(t, 5, cfg.Databases[0].Retry.MaxAttempts)
-}
-
-func TestEnvExpansionInQuotedValueStaysString(t *testing.T) {
-	t.Setenv("WALX_TEST_BOOL", "false")
-	_, err := config.Parse([]byte(mk("      auto_create: \"${WALX_TEST_BOOL}\"\n", "")))
-	require.ErrorContains(t, err, "databases[0].postgres.auto_create")
-}
-
-func TestAliasesAreRejected(t *testing.T) {
-	_, err := config.Parse([]byte(`
+`,
+			wants: []string{"WALX_TEST_UNSET", "databases[0].postgres.url"},
+		},
+		{
+			name:  "unset variable in a list",
+			doc:   mk("", "    tables:\n      - name: public.t\n        drop_columns: [\"${WALX_TEST_UNSET}\"]\n"),
+			wants: []string{"databases[0].tables[0].drop_columns[0]"},
+		},
+		{
+			name:  "quoted value stays a string",
+			env:   map[string]string{"WALX_TEST_BOOL": "false"},
+			doc:   mk("      auto_create: \"${WALX_TEST_BOOL}\"\n", ""),
+			wants: []string{"databases[0].postgres.auto_create"},
+		},
+		{
+			name: "aliases are rejected",
+			doc: `
 databases:
   - name: a
     postgres: {url: &u "postgres://u@h/d"}
@@ -92,7 +132,20 @@ databases:
   - name: b
     postgres: {url: *u}
     sink: {type: stdout}
-`))
-	require.ErrorContains(t, err, "databases[1].postgres.url")
-	require.ErrorContains(t, err, "aliases are not supported")
+`,
+			wants: []string{"databases[1].postgres.url", "aliases are not supported"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			_, err := config.Parse([]byte(tt.doc))
+			require.Error(t, err)
+			for _, want := range tt.wants {
+				require.ErrorContains(t, err, want)
+			}
+		})
+	}
 }
