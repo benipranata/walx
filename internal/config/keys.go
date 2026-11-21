@@ -11,7 +11,8 @@ import (
 )
 
 // lineKeys remembers the key path written on each line, so that decode errors,
-// which only carry a line, can name the key.
+// which only carry a line, can name the key. A line holding several keys (flow
+// style) maps to "", since the error cannot say which one it means.
 type lineKeys map[int]string
 
 var lineRef = regexp.MustCompile(`^line (\d+): (.*)$`)
@@ -31,7 +32,7 @@ func (l lineKeys) name(err error) error {
 		}
 		var line int
 		fmt.Sscan(m[1], &line)
-		if key, ok := l[line]; ok {
+		if key := l[line]; key != "" {
 			errs[i] = fmt.Errorf("%s (line %d): %s", key, line, m[2])
 		}
 	}
@@ -47,7 +48,11 @@ func checkKeys(n *yaml.Node, t reflect.Type, path string, lines lineKeys) (errs 
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key, val := n.Content[i], n.Content[i+1]
 			p := joinKey(path, key.Value)
-			lines[key.Line] = p
+			if _, shared := lines[key.Line]; shared {
+				lines[key.Line] = ""
+			} else {
+				lines[key.Line] = p
+			}
 			ft, ok := fields[key.Value]
 			if !ok {
 				errs = append(errs, fmt.Errorf("%s (line %d): unknown key", p, key.Line))
