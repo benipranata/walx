@@ -102,6 +102,17 @@ func TestPublicationIntegration(t *testing.T) {
 			cfg.Postgres.AutoAlter = false
 			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
 		}},
+		{name: "failed auto_alter leaves the publication unchanged", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			_, err := admin.Exec(ctx, `CREATE PUBLICATION p_half FOR TABLE a WITH (publish = 'insert')`)
+			require.NoError(t, err)
+			cfg := db("p_half", true, true, tbl("public.a", event.OpInsert, event.OpUpdate), tbl("public.missing"))
+
+			err = EnsurePublication(ctx, c.PgConn(), cfg)
+			require.Error(t, err)
+			require.Equal(t, pubRow{Ins: true}, read(t, "p_half"))
+			require.Equal(t, []string{"a"}, tables(t, "p_half"))
+		}},
 		{name: "all tables vs list cannot be altered", run: func(t *testing.T) {
 			c := connect(t, ctx, url)
 			_, err := admin.Exec(ctx, `CREATE PUBLICATION p_kind FOR ALL TABLES WITH (publish_via_partition_root = true)`)

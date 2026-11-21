@@ -110,10 +110,10 @@ func EnsurePublication(ctx context.Context, pg *pgconn.PgConn, db config.Databas
 		}
 		return fmt.Errorf("publication %q: %w: %s (%s)", spec.Name, ErrPublicationDrift, strings.Join(problems, "; "), hint)
 	}
-	for _, sql := range fixes {
-		if err := exec(ctx, pg, sql); err != nil {
-			return fmt.Errorf("alter publication %q: %w", spec.Name, err)
-		}
+	// One simple-protocol query runs as one implicit transaction, so a failing
+	// statement leaves the publication unchanged.
+	if err := exec(ctx, pg, strings.Join(fixes, "; ")); err != nil {
+		return fmt.Errorf("alter publication %q: %w", spec.Name, err)
 	}
 	return nil
 }
