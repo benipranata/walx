@@ -3,11 +3,15 @@ package event
 // Op is the kind of change an Event describes.
 type Op string
 
-// The operations walx emits.
 const (
-	OpInsert   Op = "insert"
-	OpUpdate   Op = "update"
-	OpDelete   Op = "delete"
+	// OpInsert is a new row.
+	OpInsert Op = "insert"
+	// OpUpdate is a changed row.
+	OpUpdate Op = "update"
+	// OpDelete is a removed row.
+	OpDelete Op = "delete"
+	// OpTruncate is a table truncation.
 	OpTruncate Op = "truncate"
-	OpSnapshot Op = "snapshot" // backfill rows; never a table op in config
+	// OpSnapshot is a backfilled row; it is never a table op in config.
+	OpSnapshot Op = "snapshot"
 )
