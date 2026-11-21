@@ -309,3 +309,26 @@ func TestStandbyDefaults(t *testing.T) {
 		})
 	}
 }
+
+func TestStandbySetConfirmed(t *testing.T) {
+	tests := []struct {
+		name string
+		set  []pglogrepl.LSN
+		want pglogrepl.LSN
+	}{
+		{name: "moves forward", set: []pglogrepl.LSN{20, 30}, want: 30},
+		{name: "never moves backwards", set: []pglogrepl.LSN{30, 20}, want: 30},
+		{name: "zero is ignored", set: []pglogrepl.LSN{0}, want: 10},
+		{name: "equal value", set: []pglogrepl.LSN{10}, want: 10},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := NewStandby(nil, 10, time.Second)
+			require.NoError(t, err)
+			for _, lsn := range tt.set {
+				s.SetConfirmed(lsn)
+			}
+			require.Equal(t, tt.want, s.Confirmed())
+		})
+	}
+}

@@ -74,8 +74,14 @@ func (s *Standby) Messages() <-chan pglogrepl.XLogData {
 
 // SetConfirmed records the LSN that is durable at the destination. It is the
 // flushed position of the next status update and is safe for concurrent use.
+// The confirmed LSN never moves backwards, so a stale or zero value is ignored.
 func (s *Standby) SetConfirmed(lsn pglogrepl.LSN) {
-	s.confirmed.Store(uint64(lsn))
+	for {
+		cur := s.confirmed.Load()
+		if uint64(lsn) <= cur || s.confirmed.CompareAndSwap(cur, uint64(lsn)) {
+			return
+		}
+	}
 }
 
 // Confirmed returns the LSN last set with SetConfirmed.
