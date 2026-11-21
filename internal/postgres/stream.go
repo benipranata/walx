@@ -15,7 +15,9 @@ import (
 // connection with proto_version '1' (no streaming) and the publication. lsn is
 // the confirmed LSN, or 0 to resume from the slot's own position. A slot
 // another session is using fails with ErrSlotActive, a lost one with
-// ErrSlotLost and a missing one with ErrSlotMissing, all wrapped.
+// ErrSlotLost and a missing one with ErrSlotMissing, all wrapped. A missing
+// publication is not reported here: the server only warns once streaming
+// starts, and Standby.Run turns that into ErrPublicationMissing.
 func StartStream(ctx context.Context, pg *pgconn.PgConn, slot, publication string, lsn pglogrepl.LSN) error {
 	opts := pglogrepl.StartReplicationOptions{PluginArgs: streamArgs(publication)}
 	if err := pglogrepl.StartReplication(ctx, pg, slot, lsn, opts); err != nil {

@@ -123,6 +123,12 @@ func (s *Standby) handle(ctx context.Context, msg pgproto3.BackendMessage) error
 		return s.handleCopyData(ctx, m.Data)
 	case *pgproto3.ErrorResponse:
 		return fmt.Errorf("receive: %w", pgconn.ErrorResponseToPgError(m))
+	case *pgproto3.NoticeResponse:
+		// pgoutput only warns, and then streams nothing, when a named
+		// publication does not exist.
+		if m.SeverityUnlocalized == "WARNING" && m.Code == "55000" {
+			return fmt.Errorf("%w: %s", ErrPublicationMissing, m.Message)
+		}
 	case *pgproto3.CopyDone:
 		return ErrStreamEnded
 	}

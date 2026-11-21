@@ -72,6 +72,30 @@ func TestStandbyIntegration(t *testing.T) {
 			rcancel()
 			require.ErrorIs(t, <-done, context.Canceled)
 		}},
+		{name: "missing publication ends the stream with an error", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			info, err := EnsureSlot(ctx, c.PgConn(), "s_nopub", true)
+			require.NoError(t, err)
+			require.NoError(t, StartStream(ctx, c.PgConn(), "s_nopub", "nopub", 0))
+
+			s, err := NewStandby(c.PgConn(), info.ConfirmedFlushLSN, time.Second)
+			require.NoError(t, err)
+			done := make(chan error, 1)
+			go func() { done <- s.Run(ctx) }()
+			go func() {
+				for range s.Messages() {
+				}
+			}()
+
+			_, err = admin.Exec(ctx, `INSERT INTO t VALUES (2)`)
+			require.NoError(t, err)
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, ErrPublicationMissing)
+			case <-time.After(10 * time.Second):
+				t.Fatal("stream kept running with a missing publication")
+			}
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)

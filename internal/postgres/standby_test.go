@@ -204,6 +204,26 @@ func TestStandbyRun(t *testing.T) {
 			wantErr: func(t *testing.T, err error) { require.ErrorContains(t, err, "parse xlogdata") },
 		},
 		{
+			name: "publication warning ends the stream",
+			in: []recv{{msg: &pgproto3.NoticeResponse{
+				SeverityUnlocalized: "WARNING", Code: "55000", Message: `skipped loading publication "nopub"`,
+			}}},
+			wait:    func(t *testing.T, s *Standby, f *fakeConn) {},
+			wantErr: func(t *testing.T, err error) { require.ErrorIs(t, err, ErrPublicationMissing) },
+		},
+		{
+			name: "other warnings and notices are ignored",
+			in: []recv{
+				{msg: &pgproto3.NoticeResponse{SeverityUnlocalized: "WARNING", Code: "01000", Message: "other"}},
+				{msg: &pgproto3.NoticeResponse{SeverityUnlocalized: "NOTICE", Code: "55000", Message: "info"}},
+				{msg: keepalive(true)},
+			},
+			wait: func(t *testing.T, s *Standby, f *fakeConn) {
+				require.Eventually(t, func() bool { return len(f.statuses()) >= 1 }, time.Second, time.Millisecond)
+			},
+			wantErr: func(t *testing.T, err error) { require.ErrorIs(t, err, context.Canceled) },
+		},
+		{
 			name: "empty, unknown and other messages are ignored",
 			in: []recv{
 				{msg: &pgproto3.CopyData{}},
