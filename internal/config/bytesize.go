@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -13,15 +14,17 @@ import (
 // unit: B, KiB, MiB, GiB, TiB, KB, MB, GB, TB.
 type ByteSize int64
 
-// Longer suffixes come first, since every unit but B... ends in B.
-var byteUnits = []struct {
+type byteUnit struct {
 	suffix string
 	size   int64
-}{
-	{"KiB", 1 << 10}, {"MiB", 1 << 20}, {"GiB", 1 << 30}, {"TiB", 1 << 40},
-	{"KB", 1e3}, {"MB", 1e6}, {"GB", 1e9}, {"TB", 1e12},
-	{"B", 1},
 }
+
+// binaryUnits run from largest to smallest; String picks the first that divides.
+var binaryUnits = []byteUnit{{"TiB", 1 << 40}, {"GiB", 1 << 30}, {"MiB", 1 << 20}, {"KiB", 1 << 10}}
+
+// parseUnits lists longer suffixes first, since every unit ends in B.
+var parseUnits = slices.Concat(binaryUnits,
+	[]byteUnit{{"TB", 1e12}, {"GB", 1e9}, {"MB", 1e6}, {"KB", 1e3}, {"B", 1}})
 
 // UnmarshalYAML parses a size such as 256MiB.
 func (b *ByteSize) UnmarshalYAML(n *yaml.Node) error {
@@ -35,8 +38,8 @@ func (b *ByteSize) UnmarshalYAML(n *yaml.Node) error {
 
 // String formats the size in the largest binary unit that divides it exactly.
 func (b ByteSize) String() string {
-	for i := 3; i >= 0; i-- {
-		if u := byteUnits[i]; int64(b) != 0 && int64(b)%u.size == 0 {
+	for _, u := range binaryUnits {
+		if int64(b) != 0 && int64(b)%u.size == 0 {
 			return fmt.Sprintf("%d%s", int64(b)/u.size, u.suffix)
 		}
 	}
@@ -48,7 +51,7 @@ func parseByteSize(n *yaml.Node) (ByteSize, error) {
 		return 0, fmt.Errorf("invalid byte size: expected a scalar")
 	}
 	num, mult := n.Value, int64(1)
-	for _, u := range byteUnits {
+	for _, u := range parseUnits {
 		if strings.HasSuffix(num, u.suffix) {
 			num, mult = strings.TrimSuffix(num, u.suffix), u.size
 			break

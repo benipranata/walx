@@ -56,8 +56,11 @@ func TestByteSizeString(t *testing.T) {
 		in   config.ByteSize
 		want string
 	}{
+		{"zero", 0, "0B"},
+		{"one binary unit", 1 << 10, "1KiB"},
 		{"binary unit", 256 << 20, "256MiB"},
 		{"plain bytes", 1500, "1500B"},
+		{"decimal sizes are not used", 1000, "1000B"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
