@@ -19,6 +19,9 @@ func TestValidationErrors(t *testing.T) {
 	tests := []struct {
 		name, doc, want string
 	}{
+		{"null database entry", "databases:\n  - null\n", "databases[0] (line 2): must not be null"},
+		{"null entry before a valid one", "databases:\n  - null\n  - {name: a, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0] (line 2): must not be null"},
+		{"null table entry", mk("", "    tables:\n      - null\n"), "databases[0].tables[0] (line 8): must not be null"},
 		{"no databases", "databases: []\n", "databases: at least one"},
 		{"missing databases key", "shutdown_timeout: 5s\n", "databases: at least one"},
 		{"missing name", "databases:\n  - postgres: {url: \"postgres://u@h/d\"}\n    sink: {type: stdout}\n", "databases[0].name"},

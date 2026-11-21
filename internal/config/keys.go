@@ -65,7 +65,13 @@ func checkKeys(n *yaml.Node, t reflect.Type, path string, lines lineKeys) (errs 
 		}
 	case n.Kind == yaml.SequenceNode && t.Kind() == reflect.Slice:
 		for i, item := range n.Content {
-			errs = append(errs, checkKeys(item, t.Elem(), fmt.Sprintf("%s[%d]", path, i), lines)...)
+			p := fmt.Sprintf("%s[%d]", path, i)
+			if item.Kind == yaml.ScalarNode && item.Tag == "!!null" {
+				// yaml drops a null item, which would shift every later index.
+				errs = append(errs, fmt.Errorf("%s (line %d): must not be null", p, item.Line))
+				continue
+			}
+			errs = append(errs, checkKeys(item, t.Elem(), p, lines)...)
 		}
 	}
 	return errs
