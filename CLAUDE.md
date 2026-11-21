@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1, T3.2 and T3.7) and `internal/filter` op filtering (T4.1) exist; permanent errors (T3.3) are done; idle advance, shutdown, supervisor and sinks are not started.
+Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1, T3.2 and T3.7) and `internal/filter` op filtering (T4.1) exist; permanent errors (T3.3) and idle advance (T3.4) are done; shutdown, supervisor and sinks are not started.
 
 ## Architecture rules
 
@@ -37,6 +37,7 @@ Status: milestones M1 (config, connection, slot, publication, stream start, stan
 - Postgres: under REPLICA IDENTITY FULL the Relation message flags every column as key, so `DecodeDML` falls back to the whole row; the identity check (T4.5) must pass the primary key in its `keys` map.
 - Engine: `pglogrepl.Parse` panics on an empty payload, so `decodeMessage` guards `len(WALData)==0`. The `send`, `confirm`, `empty` and `decode` func fields on `Engine` are the seams for T3.2 to T3.6; extend them instead of rewiring `deliver`. An empty retry policy behaves as `stop` in the engine; config defaults supply `forever`.
 - Engine: `withPermanent` wraps `withRetry`; skip returns nil so `deliver` confirms `EndLSN`; only `event.Permanent` is skippable; `events_skipped_total` counts events with label `database`.
+- Engine: idle advance runs on the reader goroutine: `keepalive` confirms the server WAL end only when `pending == 0` (batches queued or in flight, incremented by the reader before queueing, decremented by `deliver` after confirm) and `!TxBuffer.InTx()`. Empty batches are confirmed by `deliver` via `confirmEmpty` so they stay in order after earlier batches. `Standby.Keepalives()` is a one-slot latest-wins channel and `Source` requires it (nil is fine for fakes). pgoutput emits no Begin/Commit for transactions touching no published table, so only keepalives advance the LSN for them.
 - Tests: a fake must not close a channel a feeder goroutine may still send on (panic); close only from the sender or leave it open.
 - Postgres tests: `pg_stat_replication.application_name` is empty for walx; join `pg_replication_slots.active_pid = pg_stat_replication.pid` to find its walsender.
 
