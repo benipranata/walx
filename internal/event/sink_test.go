@@ -18,4 +18,5 @@ func TestSinkFunc(t *testing.T) {
 	want := event.Batch{CommitLSN: 1, EndLSN: 2, Events: []event.Event{{ID: "a"}}}
 	require.NoError(t, s.Send(context.Background(), want))
 	require.Equal(t, want, got)
+	require.NoError(t, s.Close())
 }
