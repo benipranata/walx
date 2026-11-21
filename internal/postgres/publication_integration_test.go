@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -111,9 +110,19 @@ func TestPublicationIntegration(t *testing.T) {
 			require.ErrorIs(t, err, ErrPublicationDrift)
 		}},
 		{name: "role that cannot create all tables fails clearly", run: func(t *testing.T) {
-			_, err := admin.Exec(ctx, `CREATE ROLE lim LOGIN REPLICATION PASSWORD 'lim'; GRANT CREATE ON DATABASE walx TO lim`)
+			cfg, err := pgx.ParseConfig(url)
 			require.NoError(t, err)
-			c := connect(t, ctx, strings.Replace(url, "walx:walx@", "lim:lim@", 1))
+			_, err = admin.Exec(ctx, `DROP ROLE IF EXISTS lim`)
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, `CREATE ROLE lim LOGIN REPLICATION PASSWORD 'lim'`)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = admin.Exec(ctx, `REVOKE ALL ON DATABASE `+pgx.Identifier{cfg.Database}.Sanitize()+` FROM lim`)
+				_, _ = admin.Exec(ctx, `DROP ROLE IF EXISTS lim`)
+			})
+			_, err = admin.Exec(ctx, `GRANT CREATE ON DATABASE `+pgx.Identifier{cfg.Database}.Sanitize()+` TO lim`)
+			require.NoError(t, err)
+			c := connect(t, ctx, withUser(t, url, "lim", "lim"))
 			err = EnsurePublication(ctx, c.PgConn(), db("p_lim", true, false))
 			require.ErrorContains(t, err, "FOR ALL TABLES")
 			require.ErrorContains(t, err, "list tables explicitly")

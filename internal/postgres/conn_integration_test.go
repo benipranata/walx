@@ -2,6 +2,9 @@ package postgres
 
 import (
 	"context"
+	"fmt"
+	neturl "net/url"
+	"os"
 	"strconv"
 	"testing"
 	"time"
@@ -10,30 +13,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/stretchr/testify/require"
-	"github.com/testcontainers/testcontainers-go"
-	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
-	"github.com/testcontainers/testcontainers-go/wait"
 
 	"github.com/benipranata/walx/internal/config"
 )
 
+// startPostgres skips unless WALX_TEST_POSTGRES_URL points at a server with
+// wal_level=logical, and returns the URL of a fresh throwaway database on it.
 func startPostgres(t *testing.T) string {
 	t.Helper()
-	testcontainers.SkipIfProviderIsNotHealthy(t)
-	ctx := context.Background()
-	ctr, err := tcpostgres.Run(ctx, "postgres:18-alpine",
-		tcpostgres.WithDatabase("walx"),
-		tcpostgres.WithUsername("walx"),
-		tcpostgres.WithPassword("walx"),
-		testcontainers.WithCmd("postgres", "-c", "wal_level=logical"),
-		tcpostgres.BasicWaitStrategies(),
-		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp")),
-	)
-	testcontainers.CleanupContainer(t, ctr)
-	require.NoError(t, err)
-	url, err := ctr.ConnectionString(ctx, "sslmode=disable")
-	require.NoError(t, err)
-	return url
+	base := os.Getenv("WALX_TEST_POSTGRES_URL")
+	if base == "" {
+		t.Skip("WALX_TEST_POSTGRES_URL not set")
+	}
+	return isolatedDatabase(t, base)
 }
 
 func TestConnIntegration(t *testing.T) {
@@ -56,7 +48,9 @@ func TestConnIntegration(t *testing.T) {
 			require.NoError(t, err)
 			require.NotEmpty(t, sys.SystemID)
 			require.NotZero(t, sys.XLogPos)
-			require.Equal(t, "walx", sys.DBName)
+			cfg, err := pgx.ParseConfig(url)
+			require.NoError(t, err)
+			require.Equal(t, cfg.Database, sys.DBName)
 		}},
 		{name: "terminate backend resumes without loss", run: func(t *testing.T) {
 			_, err := admin.Exec(ctx, `CREATE TABLE t (id int primary key)`)
@@ -142,4 +136,34 @@ func insertedID(t *testing.T, msg pgproto3.BackendMessage) (int, bool) {
 	id, err := strconv.Atoi(string(xld.WALData[13:]))
 	require.NoError(t, err)
 	return id, true
+}
+
+// isolatedDatabase creates a throwaway database on the server at base, so
+// tests sharing one server never see each other's slots or tables.
+func isolatedDatabase(t *testing.T, base string) string {
+	t.Helper()
+	ctx := context.Background()
+	admin, err := pgx.Connect(ctx, base)
+	require.NoError(t, err)
+	name := fmt.Sprintf("walx_test_%d", time.Now().UnixNano())
+	_, err = admin.Exec(ctx, "CREATE DATABASE "+name)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		defer admin.Close(ctx)
+		_, _ = admin.Exec(ctx, `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = $1`, name)
+		_, _ = admin.Exec(ctx, `SELECT pg_drop_replication_slot(slot_name) FROM pg_replication_slots WHERE database = $1`, name)
+		_, _ = admin.Exec(ctx, "DROP DATABASE IF EXISTS "+name+" WITH (FORCE)")
+	})
+	u, err := neturl.Parse(base)
+	require.NoError(t, err)
+	u.Path = "/" + name
+	return u.String()
+}
+
+func withUser(t *testing.T, base, user, password string) string {
+	t.Helper()
+	u, err := neturl.Parse(base)
+	require.NoError(t, err)
+	u.User = neturl.UserPassword(user, password)
+	return u.String()
 }

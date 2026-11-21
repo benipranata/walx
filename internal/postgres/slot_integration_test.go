@@ -65,6 +65,7 @@ func TestSlotIntegration(t *testing.T) {
 		{name: "foreign slot kinds rejected", run: func(t *testing.T) {
 			_, err := admin.Exec(ctx, `SELECT pg_create_physical_replication_slot('s_phys')`)
 			require.NoError(t, err)
+			t.Cleanup(func() { _, _ = admin.Exec(ctx, `SELECT pg_drop_replication_slot('s_phys')`) })
 			_, err = admin.Exec(ctx, `SELECT pg_create_logical_replication_slot('s_test_decoding', 'test_decoding')`)
 			if err == nil {
 				c := connect(t, ctx, url)
