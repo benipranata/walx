@@ -227,7 +227,11 @@ func TestStandbyRun(t *testing.T) {
 			if tt.interval == 0 {
 				tt.interval = 10 * time.Millisecond
 			}
-			s := newStandby(f, tt.confirm, tt.interval)
+			if tt.confirm == 0 {
+				tt.confirm = 1 // a zero start LSN is rejected
+			}
+			s, err := newStandby(f, tt.confirm, tt.interval)
+			require.NoError(t, err)
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			done := make(chan error, 1)
@@ -258,18 +262,27 @@ func TestStandbyRun(t *testing.T) {
 func TestStandbyDefaults(t *testing.T) {
 	tests := []struct {
 		name     string
+		start    pglogrepl.LSN
 		interval time.Duration
 		want     time.Duration
+		wantErr  error
 	}{
-		{name: "zero", want: defaultStatusInterval},
-		{name: "negative", interval: -1, want: defaultStatusInterval},
-		{name: "set", interval: time.Second, want: time.Second},
+		{name: "zero", start: 7, want: defaultStatusInterval},
+		{name: "negative", start: 7, interval: -1, want: defaultStatusInterval},
+		{name: "set", start: 7, interval: time.Second, want: time.Second},
+		{name: "zero start would confirm unhandled WAL", interval: time.Second, wantErr: ErrZeroStartLSN},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s := NewStandby(nil, 7, tt.interval)
+			s, err := NewStandby(nil, tt.start, tt.interval)
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				require.Nil(t, s)
+				return
+			}
+			require.NoError(t, err)
 			require.Equal(t, tt.want, s.interval)
-			require.Equal(t, pglogrepl.LSN(7), s.Confirmed())
+			require.Equal(t, tt.start, s.Confirmed())
 		})
 	}
 }

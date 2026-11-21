@@ -37,12 +37,13 @@ func TestStandbyIntegration(t *testing.T) {
 		{name: "idle connection survives wal_sender_timeout", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			c := connect(t, ctx, url)
-			_, err := pglogrepl.CreateReplicationSlot(ctx, c.PgConn(), "s", "pgoutput",
-				pglogrepl.CreateReplicationSlotOptions{})
+			info, err := EnsureSlot(ctx, c.PgConn(), "s", true)
 			require.NoError(t, err)
+			require.NotZero(t, info.ConfirmedFlushLSN)
 			require.NoError(t, StartStream(ctx, c.PgConn(), "s", "p", 0))
 
-			s := NewStandby(c.PgConn(), 0, time.Second)
+			s, err := NewStandby(c.PgConn(), info.ConfirmedFlushLSN, time.Second)
+			require.NoError(t, err)
 			rctx, rcancel := context.WithCancel(ctx)
 			done := make(chan error, 1)
 			go func() { done <- s.Run(rctx) }()

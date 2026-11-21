@@ -20,7 +20,7 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - CLI: `cmd/walx` logic lives in `run(args, stdout, stderr) int` so exit codes and messages are testable; exit 2 for usage errors, 1 for runtime errors including "not implemented".
 - Postgres: a replication=database walsender accepts plain SQL only over the simple protocol, so use `pgconn.Exec`, never parameterised `pgx` queries.
 - Postgres: after `StartReplication` fails, pglogrepl leaves `ReadyForQuery` unread; reconnect instead of reusing the connection. The slot can stay active briefly after a killed backend, so the engine treats `ErrSlotActive` as retryable on reconnect and fatal at first start.
-- Postgres: `pglogrepl.SendStandbyStatusUpdate` ignores its ctx and replaces a flush or apply LSN of 0 with the write position, so start `Standby` with the slot's confirmed LSN, never 0, or unhandled WAL is confirmed.
+- Postgres: `pglogrepl.SendStandbyStatusUpdate` replaces a flush or apply LSN of 0 with the write position and would confirm unhandled WAL, so `NewStandby` rejects a zero start; seed it with `SlotInfo.ConfirmedFlushLSN`. `StartStream` still takes 0 to resume from the slot.
 - Postgres: pgconn is not safe for concurrent use; `Standby.Run` is the single goroutine that receives (with a deadline so the timer fires) and writes. `ReceiveMessage` after a timeout loses no data; copy `WALData`, since pgconn reuses its buffer.
 - Postgres: `FOR ALL TABLES` needs superuser, also on 18. With `publish_via_partition_root`, `pg_publication_tables` lists the root table. `auto_alter` never switches between `FOR ALL TABLES` and a table list.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.

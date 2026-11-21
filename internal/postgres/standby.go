@@ -22,6 +22,11 @@ const (
 // stream.
 var ErrStreamEnded = errors.New("replication stream ended")
 
+// ErrZeroStartLSN is returned by NewStandby for a start LSN of 0. pglogrepl
+// sends a flush LSN of 0 as the write position, which would confirm WAL the
+// sink has not made durable.
+var ErrZeroStartLSN = errors.New("standby start LSN must not be 0: use the slot's confirmed_flush_lsn")
+
 // walConn is the part of the replication connection Standby uses.
 type walConn interface {
 	ReceiveMessage(ctx context.Context) (pgproto3.BackendMessage, error)
@@ -42,20 +47,23 @@ type Standby struct {
 }
 
 // NewStandby returns a Standby for a connection on which StartStream has
-// succeeded. start is the LSN the stream started from and interval is the
-// status update period, 10s when zero or negative; keep it well below
-// wal_sender_timeout.
-func NewStandby(pg *pgconn.PgConn, start pglogrepl.LSN, interval time.Duration) *Standby {
+// succeeded. start is the slot's confirmed_flush_lsn (SlotInfo), never 0, and
+// interval is the status update period, 10s when zero or negative; keep it well
+// below wal_sender_timeout.
+func NewStandby(pg *pgconn.PgConn, start pglogrepl.LSN, interval time.Duration) (*Standby, error) {
 	return newStandby(pgConn{pg}, start, interval)
 }
 
-func newStandby(conn walConn, start pglogrepl.LSN, interval time.Duration) *Standby {
+func newStandby(conn walConn, start pglogrepl.LSN, interval time.Duration) (*Standby, error) {
+	if start == 0 {
+		return nil, ErrZeroStartLSN
+	}
 	if interval <= 0 {
 		interval = defaultStatusInterval
 	}
 	s := &Standby{conn: conn, interval: interval, out: make(chan pglogrepl.XLogData), received: start}
 	s.confirmed.Store(uint64(start))
-	return s
+	return s, nil
 }
 
 // Messages returns the channel of XLogData messages in WAL order. Run closes it
