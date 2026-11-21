@@ -56,7 +56,10 @@ func (c *Config) validate() error {
 
 		validateSink(d.Sink, key, bad)
 		if d.Sink.Type == "file" && d.Sink.Path != "" {
-			p := filepath.Clean(d.Sink.Path)
+			p, err := filepath.Abs(d.Sink.Path)
+			if err != nil {
+				p = filepath.Clean(d.Sink.Path)
+			}
 			if paths[p] {
 				bad(key("sink.path"), "another file sink already writes to %q", d.Sink.Path)
 			}

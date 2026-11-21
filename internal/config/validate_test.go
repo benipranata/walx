@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -12,6 +13,8 @@ func TestValidationErrors(t *testing.T) {
 	file := func(name, path string) string {
 		return "  - name: " + name + "\n    postgres: {url: \"postgres://u@h/" + name + "\"}\n    sink: {type: file, path: " + path + "}\n"
 	}
+	abs, err := filepath.Abs("x.jsonl")
+	require.NoError(t, err)
 	tests := []struct {
 		name, doc, want string
 	}{
@@ -20,6 +23,7 @@ func TestValidationErrors(t *testing.T) {
 		{"missing name", "databases:\n  - postgres: {url: \"postgres://u@h/d\"}\n    sink: {type: stdout}\n", "databases[0].name"},
 		{"duplicate names", "databases:\n" + file("a", "./a") + file("a", "./b"), "databases[1].name"},
 		{"duplicate file paths", "databases:\n" + file("a", "./x.jsonl") + file("b", "x.jsonl"), "databases[1].sink.path"},
+		{"relative and absolute file paths", "databases:\n" + file("a", abs) + file("b", "x.jsonl"), "databases[1].sink.path"},
 		{"same url and slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
