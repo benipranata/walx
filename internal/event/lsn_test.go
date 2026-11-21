@@ -9,6 +9,17 @@ import (
 )
 
 func TestLSNString(t *testing.T) {
-	require.Equal(t, "0/0", event.LSN(0).String())
-	require.Equal(t, "16/B374D848", event.LSN(0x16B374D848).String())
+	tests := []struct {
+		name string
+		lsn  event.LSN
+		want string
+	}{
+		{"zero", 0, "0/0"},
+		{"both halves", 0x16B374D848, "16/B374D848"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.lsn.String())
+		})
+	}
 }

@@ -10,14 +10,19 @@ import (
 )
 
 func TestUnchangedMarshalJSON(t *testing.T) {
-	b, err := json.Marshal(event.Unchanged)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"$unchanged":true}`, string(b))
-}
-
-func TestUnchangedInsideRow(t *testing.T) {
-	row := map[string]any{"id": 1, "body": event.Unchanged}
-	b, err := json.Marshal(row)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"id":1,"body":{"$unchanged":true}}`, string(b))
+	tests := []struct {
+		name string
+		in   any
+		want string
+	}{
+		{"standalone", event.Unchanged, `{"$unchanged":true}`},
+		{"inside a row", map[string]any{"id": 1, "body": event.Unchanged}, `{"id":1,"body":{"$unchanged":true}}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(tt.in)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(b))
+		})
+	}
 }

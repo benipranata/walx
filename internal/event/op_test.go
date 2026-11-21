@@ -10,9 +10,21 @@ import (
 )
 
 func TestOpJSON(t *testing.T) {
-	for _, op := range []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate, event.OpSnapshot} {
-		b, err := json.Marshal(op)
-		require.NoError(t, err)
-		require.Equal(t, `"`+string(op)+`"`, string(b))
+	tests := []struct {
+		op   event.Op
+		want string
+	}{
+		{event.OpInsert, `"insert"`},
+		{event.OpUpdate, `"update"`},
+		{event.OpDelete, `"delete"`},
+		{event.OpTruncate, `"truncate"`},
+		{event.OpSnapshot, `"snapshot"`},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.op), func(t *testing.T) {
+			b, err := json.Marshal(tt.op)
+			require.NoError(t, err)
+			require.Equal(t, tt.want, string(b))
+		})
 	}
 }

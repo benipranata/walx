@@ -11,26 +11,40 @@ import (
 )
 
 func TestEventJSON(t *testing.T) {
-	e := event.Event{
-		ID:       "main-0/10-1",
-		Source:   "main",
-		Op:       event.OpUpdate,
-		Schema:   "public",
-		Table:    "users",
-		Before:   map[string]any{"id": 1},
-		After:    map[string]any{"id": 1, "bio": event.Unchanged},
-		Key:      map[string]any{"id": 1},
-		LSN:      16,
-		TxID:     7,
-		CommitTS: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+	tests := []struct {
+		name string
+		in   event.Event
+		want string
+	}{
+		{
+			"every field",
+			event.Event{
+				ID:       "main-0/10-1",
+				Source:   "main",
+				Op:       event.OpUpdate,
+				Schema:   "public",
+				Table:    "users",
+				Before:   map[string]any{"id": 1},
+				After:    map[string]any{"id": 1, "bio": event.Unchanged},
+				Key:      map[string]any{"id": 1},
+				LSN:      16,
+				TxID:     7,
+				CommitTS: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			},
+			`{
+				"id":"main-0/10-1","source":"main","op":"update","schema":"public","table":"users",
+				"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}},
+				"key":{"id":1},"lsn":16,"tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"
+			}`,
+		},
 	}
-	b, err := json.Marshal(e)
-	require.NoError(t, err)
-	require.JSONEq(t, `{
-		"id":"main-0/10-1","source":"main","op":"update","schema":"public","table":"users",
-		"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}},
-		"key":{"id":1},"lsn":16,"tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"
-	}`, string(b))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b, err := json.Marshal(tt.in)
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(b))
+		})
+	}
 }
 
 func TestChangedAndTransition(t *testing.T) {

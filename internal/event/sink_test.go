@@ -10,13 +10,22 @@ import (
 )
 
 func TestSinkFunc(t *testing.T) {
-	var got event.Batch
-	var s event.Sink = event.SinkFunc(func(_ context.Context, b event.Batch) error {
-		got = b
-		return nil
-	})
-	want := event.Batch{CommitLSN: 1, EndLSN: 2, Events: []*event.Event{{ID: "a"}}}
-	require.NoError(t, s.Send(context.Background(), want))
-	require.Equal(t, want, got)
-	require.NoError(t, s.Close())
+	tests := []struct {
+		name  string
+		batch event.Batch
+	}{
+		{"one event", event.Batch{CommitLSN: 1, EndLSN: 2, Events: []*event.Event{{ID: "a"}}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got event.Batch
+			var s event.Sink = event.SinkFunc(func(_ context.Context, b event.Batch) error {
+				got = b
+				return nil
+			})
+			require.NoError(t, s.Send(context.Background(), tt.batch))
+			require.Equal(t, tt.batch, got)
+			require.NoError(t, s.Close())
+		})
+	}
 }
