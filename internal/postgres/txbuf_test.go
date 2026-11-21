@@ -293,3 +293,25 @@ func TestResetClearsState(t *testing.T) {
 		})
 	}
 }
+
+func TestTxBufferInTx(t *testing.T) {
+	tests := []struct {
+		name string
+		msgs []pglogrepl.Message
+		want bool
+	}{
+		{name: "fresh buffer", want: false},
+		{name: "after begin", msgs: []pglogrepl.Message{txBegin(1)}, want: true},
+		{name: "after commit", msgs: []pglogrepl.Message{txBegin(1), txCommit()}, want: false},
+		{name: "relation outside a transaction", msgs: []pglogrepl.Message{txRelation()}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := NewTxBuffer("db", NewRelations(), nil)
+			push(t, b, tt.msgs...)
+			require.Equal(t, tt.want, b.InTx())
+			b.Reset()
+			require.False(t, b.InTx())
+		})
+	}
+}

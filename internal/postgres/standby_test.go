@@ -53,8 +53,13 @@ func (f *fakeConn) statuses() []pglogrepl.StandbyStatusUpdate {
 }
 
 func keepalive(replyRequested bool) *pgproto3.CopyData {
+	return keepaliveAt(0, replyRequested)
+}
+
+func keepaliveAt(walEnd pglogrepl.LSN, replyRequested bool) *pgproto3.CopyData {
 	b := make([]byte, 18)
 	b[0] = pglogrepl.PrimaryKeepaliveMessageByteID
+	binary.BigEndian.PutUint64(b[1:], uint64(walEnd))
 	if replyRequested {
 		b[17] = 1
 	}
@@ -329,6 +334,41 @@ func TestStandbySetConfirmed(t *testing.T) {
 				s.SetConfirmed(lsn)
 			}
 			require.Equal(t, tt.want, s.Confirmed())
+		})
+	}
+}
+
+func TestStandbyKeepalives(t *testing.T) {
+	defer goleak.VerifyNone(t)
+	tests := []struct {
+		name string
+		in   []recv
+		want []pglogrepl.LSN
+	}{
+		{name: "a keepalive publishes the server WAL end", in: []recv{{msg: keepaliveAt(0x50, false)}}, want: []pglogrepl.LSN{0x50}},
+		{name: "an unread keepalive is replaced by the latest",
+			in: []recv{{msg: keepaliveAt(0x50, false)}, {msg: keepaliveAt(0x60, false)}}, want: []pglogrepl.LSN{0x60}},
+		{name: "a zero WAL end is ignored", in: []recv{{msg: keepaliveAt(0, false)}}, want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFakeConn()
+			for _, r := range tt.in {
+				f.in <- r
+			}
+			s, err := newStandby(f, 1, time.Hour)
+			require.NoError(t, err)
+			ctx, cancel := context.WithCancel(context.Background())
+			done := make(chan error, 1)
+			go func() { done <- s.Run(ctx) }()
+			time.Sleep(50 * time.Millisecond) // let Run consume every message
+			cancel()
+			require.ErrorIs(t, <-done, context.Canceled)
+			var got []pglogrepl.LSN
+			for lsn := range s.Keepalives() {
+				got = append(got, lsn)
+			}
+			require.Equal(t, tt.want, got)
 		})
 	}
 }

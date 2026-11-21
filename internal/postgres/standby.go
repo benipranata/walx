@@ -42,6 +42,7 @@ type Standby struct {
 	conn      walConn
 	interval  time.Duration
 	out       chan pglogrepl.XLogData
+	keepalive chan pglogrepl.LSN
 	confirmed atomic.Uint64
 	received  pglogrepl.LSN
 	next      time.Time
@@ -62,7 +63,8 @@ func newStandby(conn walConn, start pglogrepl.LSN, interval time.Duration) (*Sta
 	if interval <= 0 {
 		interval = defaultStatusInterval
 	}
-	s := &Standby{conn: conn, interval: interval, out: make(chan pglogrepl.XLogData), received: start}
+	s := &Standby{conn: conn, interval: interval, out: make(chan pglogrepl.XLogData),
+		keepalive: make(chan pglogrepl.LSN, 1), received: start}
 	s.confirmed.Store(uint64(start))
 	return s, nil
 }
@@ -71,6 +73,16 @@ func newStandby(conn walConn, start pglogrepl.LSN, interval time.Duration) (*Sta
 // on return. WALData is a private copy.
 func (s *Standby) Messages() <-chan pglogrepl.XLogData {
 	return s.out
+}
+
+// Keepalives returns the server WAL end of the latest primary keepalive, in
+// a channel of one slot: a value the consumer has not read yet is replaced.
+// Everything the server had sent before that keepalive has already been handed
+// to Messages, so a consumer that decoded all of it may treat the position as
+// safe to confirm when it holds no open transaction. Run closes the channel on
+// return.
+func (s *Standby) Keepalives() <-chan pglogrepl.LSN {
+	return s.keepalive
 }
 
 // SetConfirmed records the LSN that is durable at the destination. It is the
@@ -97,6 +109,7 @@ func (s *Standby) Confirmed() pglogrepl.LSN {
 // update, best effort, and returns ctx.Err(). It closes Messages on return.
 func (s *Standby) Run(ctx context.Context) error {
 	defer close(s.out)
+	defer close(s.keepalive)
 	s.next = time.Now().Add(s.interval)
 	for {
 		rctx, cancel := context.WithDeadline(ctx, s.next)
@@ -152,6 +165,7 @@ func (s *Standby) handleCopyData(ctx context.Context, data []byte) error {
 		if err != nil {
 			return fmt.Errorf("parse keepalive: %w", err)
 		}
+		s.publishKeepalive(pkm.ServerWALEnd)
 		if pkm.ReplyRequested {
 			return s.sendStatus(ctx)
 		}
@@ -167,6 +181,18 @@ func (s *Standby) handleCopyData(ctx context.Context, data []byte) error {
 		return s.forward(ctx, xld)
 	}
 	return nil
+}
+
+// publishKeepalive keeps only the latest WAL end; Run is the only sender.
+func (s *Standby) publishKeepalive(walEnd pglogrepl.LSN) {
+	if walEnd == 0 {
+		return
+	}
+	select {
+	case <-s.keepalive:
+	default:
+	}
+	s.keepalive <- walEnd
 }
 
 // forward hands xld to the consumer while still sending status updates on
