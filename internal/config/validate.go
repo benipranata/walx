@@ -103,6 +103,9 @@ func validateTable(t TableConfig, key func(string) string, bad reporter) {
 	if strings.Count(t.Name, ".") != 1 || schema == "" || table == "" || strings.Contains(t.Name, `"`) {
 		bad(key("name"), "must be schema.table, got %q", t.Name)
 	}
+	if len(t.Ops) == 0 {
+		bad(key("ops"), "must not be empty; omit it for the default")
+	}
 	for i, op := range t.Ops {
 		if !slices.Contains(ops, op) {
 			bad(key(fmt.Sprintf("ops[%d]", i)), "unknown op %q", op)
