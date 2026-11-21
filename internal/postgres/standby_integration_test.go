@@ -24,11 +24,7 @@ func TestStandbyIntegration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = admin.Exec(ctx, `CREATE PUBLICATION p FOR TABLE t`)
 	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `ALTER SYSTEM SET wal_sender_timeout = '3s'`)
-	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `SELECT pg_reload_conf()`)
-	require.NoError(t, err)
-	time.Sleep(time.Second)
+	setServerSetting(t, url, "wal_sender_timeout", "3s")
 
 	tests := []struct {
 		name string

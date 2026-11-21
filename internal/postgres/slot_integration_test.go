@@ -122,10 +122,7 @@ func TestLostSlotIntegration(t *testing.T) {
 	require.NoError(t, err)
 	_, err = admin.Exec(ctx, `CREATE TABLE t (id int primary key); CREATE PUBLICATION p FOR TABLE t`)
 	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `ALTER SYSTEM SET max_slot_wal_keep_size = '32MB'`)
-	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `SELECT pg_reload_conf()`)
-	require.NoError(t, err)
+	setServerSetting(t, url, "max_slot_wal_keep_size", "32MB")
 
 	status := ""
 	for i := 0; i < 30 && status != "lost"; i++ {

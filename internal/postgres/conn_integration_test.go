@@ -167,3 +167,37 @@ func withUser(t *testing.T, base, user, password string) string {
 	u.User = neturl.UserPassword(user, password)
 	return u.String()
 }
+
+// setServerSetting changes a server-wide setting for one test: it refuses to
+// overwrite a customised value, waits until a fresh connection sees the new
+// one, and resets it afterwards.
+func setServerSetting(t *testing.T, url, name, value string) {
+	t.Helper()
+	ctx := context.Background()
+	alter := func(sql string) {
+		c, err := pgx.Connect(ctx, url)
+		require.NoError(t, err)
+		defer c.Close(ctx)
+		_, err = c.Exec(ctx, sql)
+		require.NoError(t, err)
+		_, err = c.Exec(ctx, `SELECT pg_reload_conf()`)
+		require.NoError(t, err)
+	}
+	show := func() (value, source string) {
+		c, err := pgx.Connect(ctx, url)
+		require.NoError(t, err)
+		defer c.Close(ctx)
+		require.NoError(t, c.QueryRow(ctx,
+			`SELECT current_setting(name), source FROM pg_settings WHERE name = $1`, name).Scan(&value, &source))
+		return value, source
+	}
+	if _, source := show(); source != "default" {
+		t.Fatalf("%s is already customised (source %q); reset it with ALTER SYSTEM RESET", name, source)
+	}
+	t.Cleanup(func() { alter(`ALTER SYSTEM RESET ` + name) })
+	alter(`ALTER SYSTEM SET ` + name + ` = '` + value + `'`)
+	require.Eventually(t, func() bool {
+		v, _ := show()
+		return v == value
+	}, 10*time.Second, 50*time.Millisecond, "%s never became %s", name, value)
+}
