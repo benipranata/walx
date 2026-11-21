@@ -9,9 +9,11 @@ import (
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/jackc/pglogrepl"
 
+	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
 	"github.com/benipranata/walx/internal/postgres"
 )
@@ -29,8 +31,9 @@ type Config struct {
 	Buffer    *postgres.TxBuffer // decodes pgoutput messages into batches
 	Filter    Filter
 	Sink      event.Sink
-	QueueSize int          // decoded batches held between reader and sink, 16 when <= 0
-	Logger    *slog.Logger // discards when nil
+	Retry     config.RetryConfig // zero value (empty policy) stops on the first sink error
+	QueueSize int                // decoded batches held between reader and sink, 16 when <= 0
+	Logger    *slog.Logger       // discards when nil
 }
 
 // Engine runs one database pipeline: a reader goroutine decodes the stream
@@ -44,6 +47,9 @@ type Engine struct {
 	send    func(ctx context.Context, b event.Batch) error
 	confirm func(lsn event.LSN)
 	empty   func(b event.Batch)
+
+	sleep  func(ctx context.Context, d time.Duration) error // retry wait, a fake clock in tests
+	jitter func(d time.Duration) time.Duration
 }
 
 // New returns an Engine for cfg.
@@ -57,7 +63,9 @@ func New(cfg Config) *Engine {
 	}
 	e := &Engine{cfg: cfg, log: log.With("db", cfg.Name)}
 	e.decode = e.decodeMessage
-	e.send = cfg.Sink.Send
+	e.sleep = sleepCtx
+	e.jitter = jitterBackoff
+	e.send = e.withRetry(cfg.Sink.Send)
 	e.confirm = func(lsn event.LSN) { cfg.Source.SetConfirmed(pglogrepl.LSN(lsn)) }
 	e.empty = func(b event.Batch) {
 		// Confirming an empty batch is the idle-advance task; until then it
