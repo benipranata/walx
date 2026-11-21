@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: `internal/event` and `internal/config` are implemented so far.
+Status: `internal/event`, `internal/config` and `internal/postgres/conn.go` (T1.4) are implemented so far; the T1.4 integration tests have not yet run against a real Postgres.
 
 ## Architecture rules
 
@@ -29,6 +29,7 @@ go test -race -run TestName ./internal/event/
 ```
 
 Integration tests use testcontainers Postgres 18 with `wal_level=logical` (needs Docker). Use goleak for goroutine-leak checks.
+They skip when Docker is unhealthy, so a green `go test` does not mean they ran. testcontainers needs a local socket or a tcp/unix `DOCKER_HOST`; it does not support `ssh://` contexts. On macOS use `python3` or `gofmt` for in-place edits (BSD `sed -i` needs a suffix).
 
 ## Conventions
 
