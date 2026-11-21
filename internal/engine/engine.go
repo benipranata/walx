@@ -34,6 +34,11 @@ type Config struct {
 	Retry     config.RetryConfig // zero value (empty policy) stops on the first sink error
 	QueueSize int                // decoded batches held between reader and sink, 16 when <= 0
 	Logger    *slog.Logger       // discards when nil
+	Metrics   event.Metrics      // discards when nil
+
+	// OnPermanentError is "stop" (default) or "skip": skip logs, counts and
+	// confirms a batch the sink rejected with event.Permanent.
+	OnPermanentError string
 }
 
 // Engine runs one database pipeline: a reader goroutine decodes the stream
@@ -65,7 +70,10 @@ func New(cfg Config) *Engine {
 	e.decode = e.decodeMessage
 	e.sleep = sleepCtx
 	e.jitter = jitterBackoff
-	e.send = e.withRetry(cfg.Sink.Send)
+	if cfg.Metrics == nil {
+		e.cfg.Metrics = event.NopMetrics{}
+	}
+	e.send = e.withPermanent(e.withRetry(cfg.Sink.Send))
 	e.confirm = func(lsn event.LSN) { cfg.Source.SetConfirmed(pglogrepl.LSN(lsn)) }
 	e.empty = func(b event.Batch) {
 		// Confirming an empty batch is the idle-advance task; until then it
