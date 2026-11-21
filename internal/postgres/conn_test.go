@@ -129,7 +129,6 @@ func TestReconnectCancel(t *testing.T) {
 		url  string
 	}{
 		{name: "unreachable", url: "postgres://u:p@127.0.0.1:1/db?connect_timeout=1"},
-		{name: "bad url", url: "postgres://[bad"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

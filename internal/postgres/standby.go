@@ -16,6 +16,7 @@ import (
 const (
 	defaultStatusInterval = 10 * time.Second
 	finalStatusTimeout    = 5 * time.Second
+	defaultSendTimeout    = 10 * time.Second
 )
 
 // ErrStreamEnded is returned by Standby.Run when the server ends the COPY
@@ -221,5 +222,15 @@ func (c pgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessage, er
 }
 
 func (c pgConn) SendStatus(ctx context.Context, ssu pglogrepl.StandbyStatusUpdate) error {
+	// pglogrepl ignores ctx, so bound the write with a connection deadline.
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(defaultSendTimeout)
+	}
+	nc := c.pg.Conn()
+	if err := nc.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	defer func() { _ = nc.SetWriteDeadline(time.Time{}) }()
 	return pglogrepl.SendStandbyStatusUpdate(ctx, c.pg, ssu)
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pglogrepl"
@@ -17,7 +18,14 @@ const (
 	minMajorVersion = 18
 	defaultInitial  = 100 * time.Millisecond
 	defaultMax      = 30 * time.Second
+
+	defaultConnectTimeout  = 10 * time.Second
+	defaultIdentifyTimeout = 10 * time.Second
 )
+
+// ErrUnsupportedVersion is returned, wrapped, when the server runs a Postgres
+// major version older than 18.
+var ErrUnsupportedVersion = errors.New("postgres 18 or later required")
 
 // Conn is a logical replication connection (replication=database) to one
 // database. It is not safe for concurrent use, like the pgconn it wraps.
@@ -27,12 +35,18 @@ type Conn struct {
 	max     time.Duration
 	onReset func()
 	pg      *pgconn.PgConn
+
+	// connect and identifyTimeout are test seams; zero values mean Connect
+	// and defaultIdentifyTimeout.
+	connect         func(context.Context) (pglogrepl.IdentifySystemResult, error)
+	identifyTimeout time.Duration
 }
 
 // New returns an unconnected Conn. The reconnect backoff uses retry.Initial
 // and retry.Max, falling back to 100ms and 30s when unset. onReset, which may
-// be nil, runs at the start of every Reconnect so the caller can clear its
-// relation cache and discard a partial transaction.
+// be nil, runs at the start of every Reconnect; it must call Relations.Reset
+// and TxBuffer.Reset so no stale relation or partial transaction survives the
+// new stream.
 func New(pg config.PostgresConfig, retry config.RetryConfig, onReset func()) *Conn {
 	c := &Conn{url: pg.URL, initial: retry.Initial, max: retry.Max, onReset: onReset}
 	if c.initial <= 0 {
@@ -60,7 +74,13 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 		_ = pg.Close(context.WithoutCancel(ctx))
 		return zero, err
 	}
-	sys, err := pglogrepl.IdentifySystem(ctx, pg)
+	timeout := c.identifyTimeout
+	if timeout <= 0 {
+		timeout = defaultIdentifyTimeout
+	}
+	ictx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	sys, err := pglogrepl.IdentifySystem(ictx, pg)
 	if err != nil {
 		_ = pg.Close(context.WithoutCancel(ctx))
 		return zero, fmt.Errorf("identify system: %w", err)
@@ -73,16 +93,25 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 }
 
 // Reconnect drops the current connection, calls the reset hook, then dials
-// with exponential backoff (factor 2) until it succeeds or ctx is done.
+// with exponential backoff (factor 2) until it succeeds or ctx is done. A
+// fatal error (see isFatalConnect) is returned at once, as retrying cannot fix
+// it.
 func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, error) {
 	_ = c.Close(ctx)
 	if c.onReset != nil {
 		c.onReset()
 	}
+	connect := c.Connect
+	if c.connect != nil {
+		connect = c.connect
+	}
 	for attempt := 0; ; attempt++ {
-		sys, err := c.Connect(ctx)
+		sys, err := connect(ctx)
 		if err == nil {
 			return sys, nil
+		}
+		if isFatalConnect(err) {
+			return sys, fmt.Errorf("reconnect: %w", err)
 		}
 		if ctx.Err() != nil {
 			return sys, fmt.Errorf("reconnect: %w", errors.Join(ctx.Err(), err))
@@ -118,7 +147,29 @@ func replicationConfig(url string) (*pgconn.Config, error) {
 		return nil, fmt.Errorf("parse postgres url: %w", err)
 	}
 	cfg.RuntimeParams["replication"] = "database"
+	if cfg.ConnectTimeout == 0 {
+		cfg.ConnectTimeout = defaultConnectTimeout
+	}
 	return cfg, nil
+}
+
+// isFatalConnect reports whether retrying a connect cannot succeed: an
+// unsupported server version, an authentication or authorization failure
+// (SQLSTATE class 28), a missing database (3D000, class 3D), or a URL that
+// does not parse. Network errors and states such as 57P03 are retryable.
+func isFatalConnect(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, ErrUnsupportedVersion) {
+		return true
+	}
+	var pe *pgconn.PgError
+	if errors.As(err, &pe) {
+		return strings.HasPrefix(pe.Code, "28") || strings.HasPrefix(pe.Code, "3D")
+	}
+	var parse *pgconn.ParseConfigError
+	return errors.As(err, &parse)
 }
 
 // checkVersion reads the major number from server_version, the only version
@@ -133,7 +184,7 @@ func checkVersion(version string) error {
 	}
 	n, err := strconv.Atoi(digits)
 	if err != nil || n < minMajorVersion {
-		return fmt.Errorf("postgres 18 or later required, server_version=%q", version)
+		return fmt.Errorf("%w, server_version=%q", ErrUnsupportedVersion, version)
 	}
 	return nil
 }
