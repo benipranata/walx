@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connection, T1.5 slot, publication and stream start, T1.6 standby writer, T2.4 transaction buffer), the `cmd/walx` snapshot stub (T1.7) and the relation cache and tuple decoding (T2.1, `decode.go`) are implemented so far; the postgres integration tests have not yet run against a real Postgres.
+Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine, sinks and filters are not started.
 
 ## Architecture rules
 
