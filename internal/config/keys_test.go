@@ -42,6 +42,29 @@ func TestKeyErrorReporting(t *testing.T) {
 			contains: []string{"postgres.a", "databases[0].b"},
 		},
 		{
+			name:     "a type error names the line",
+			doc:      mk("", "    retry:\n      initial: soon\n"),
+			contains: []string{"databases[0].retry.initial (line "},
+		},
+		{
+			name:     "a type error on a line without a key still names the line",
+			doc:      mk("", "    tables:\n      - name: public.t\n        drop_columns:\n          - {a: 1}\n"),
+			contains: []string{"line "},
+		},
+		{
+			name: "aliases are rejected",
+			doc: `
+databases:
+  - name: a
+    postgres: {url: &u "postgres://u@h/d"}
+    sink: {type: stdout}
+  - name: b
+    postgres: {url: *u}
+    sink: {type: stdout}
+`,
+			contains: []string{"databases[1].postgres.url", "aliases are not supported"},
+		},
+		{
 			name: "a decode error on a shared line does not guess the key",
 			doc: "databases:\n" +
 				"  - {name: a, name: b, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n",

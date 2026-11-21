@@ -122,19 +122,6 @@ databases:
 			doc:   mk("      auto_create: \"${WALX_TEST_BOOL}\"\n", ""),
 			wants: []string{"databases[0].postgres.auto_create"},
 		},
-		{
-			name: "aliases are rejected",
-			doc: `
-databases:
-  - name: a
-    postgres: {url: &u "postgres://u@h/d"}
-    sink: {type: stdout}
-  - name: b
-    postgres: {url: *u}
-    sink: {type: stdout}
-`,
-			wants: []string{"databases[1].postgres.url", "aliases are not supported"},
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

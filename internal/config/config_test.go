@@ -194,8 +194,6 @@ func TestParseErrors(t *testing.T) {
 		{"only a comment", "# only a comment\n", "expected a YAML mapping at the top level"},
 		{"top level is a list", "- a\n- b\n", "expected a YAML mapping at the top level"},
 		{"syntax error", "databases: [\n", "did not find expected node content"},
-		{"type error names the line", mk("", "    retry:\n      initial: soon\n"), "line "},
-		{"type error on a line without a key", mk("", "    tables:\n      - name: public.t\n        drop_columns:\n          - {a: 1}\n"), "line "},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
