@@ -28,6 +28,8 @@ Status: `internal/event`, `internal/config` and `internal/postgres` (T1.4 connec
 - Postgres: with REPLICA IDENTITY FULL the old tuple of an update carries the full TOAST value (recorded by `TestReplicaIdentityFullToastIntegration`), while the new tuple has `'u'` (`event.Unchanged`); so Before holds the value and After does not.
 - Postgres: `recordFixture` runs `dml` as one simple-protocol query, so its statements share one implicit transaction; end each with `COMMIT;` and start the next with `BEGIN;` to record separate commits.
 - Postgres: `TxBuffer` numbers `seq` from 1 over raw DML events (a truncate counts once per relation). pglogrepl returns commit times in the local zone, so `TxBuffer` converts to UTC.
+- Postgres: `TxBuffer` caps a transaction by raw tuple bytes (`postgres.max_tx_bytes`) and event count (`postgres.max_tx_events`, 0 = unlimited). Overflow returns a `*TxTooLargeError`, deliberately not `event.Permanent`: `on_permanent_error: skip` would silently drop the whole transaction.
+- Postgres: the engine must stop on `*TxTooLargeError` without retry or confirm, and a restart hits the same transaction again until the limit is raised.
 - Config: slot names are unique per server (host:port, scheme and credentials ignored) because slots are cluster-wide; publication names per server and database; table names per database.
 - Config: yaml decode errors carry only a line, so a line with several keys (flow style) is reported without a key name.
 - Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.
