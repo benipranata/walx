@@ -89,14 +89,37 @@ func TestPubSpecCreateSQL(t *testing.T) {
 }
 
 func TestQuoteTables(t *testing.T) {
-	require.Equal(t, `"public"."a", "bare"`, quoteTables([]string{"public.a", "bare"}))
+	tests := []struct {
+		name   string
+		tables []string
+		want   string
+	}{
+		{name: "schema and bare", tables: []string{"public.a", "bare"}, want: `"public"."a", "bare"`},
+		{name: "quote in a name", tables: []string{`s."t`}, want: `"s"."""t"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, quoteTables(tt.tables))
+		})
+	}
 }
 
 func TestPubQueries(t *testing.T) {
-	require.Contains(t, pubQuery("p'x"), "FROM pg_publication WHERE pubname = 'p''x'")
-	require.Contains(t, pubTablesQuery("p"), "FROM pg_publication_tables WHERE pubname = 'p'")
-	require.Contains(t, pubFilteredQuery("p'x"), "p.pubname = 'p''x'")
-	require.Contains(t, pubFilteredQuery("p"), "prqual IS NOT NULL OR r.prattrs IS NOT NULL")
+	tests := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{name: "publication quotes the name", query: pubQuery("p'x"), want: "FROM pg_publication WHERE pubname = 'p''x'"},
+		{name: "tables", query: pubTablesQuery("p"), want: "FROM pg_publication_tables WHERE pubname = 'p'"},
+		{name: "filtered quotes the name", query: pubFilteredQuery("p'x"), want: "p.pubname = 'p''x'"},
+		{name: "filtered looks at filters and column lists", query: pubFilteredQuery("p"), want: "prqual IS NOT NULL OR r.prattrs IS NOT NULL"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Contains(t, tt.query, tt.want)
+		})
+	}
 }
 
 func TestParsePub(t *testing.T) {
@@ -132,8 +155,21 @@ func TestParsePub(t *testing.T) {
 }
 
 func TestPubStateOps(t *testing.T) {
-	require.Equal(t, []event.Op{event.OpUpdate, event.OpTruncate}, pubState{Update: true, Truncate: true}.ops())
-	require.Empty(t, pubState{}.ops())
+	tests := []struct {
+		name  string
+		state pubState
+		want  []event.Op
+	}{
+		{name: "update and truncate", state: pubState{Update: true, Truncate: true}, want: []event.Op{event.OpUpdate, event.OpTruncate}},
+		{name: "all in Postgres order", state: pubState{Insert: true, Update: true, Delete: true, Truncate: true},
+			want: []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate}},
+		{name: "none", state: pubState{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, tt.state.ops())
+		})
+	}
 }
 
 func TestPubSpecDrift(t *testing.T) {

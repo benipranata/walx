@@ -17,9 +17,22 @@ func slotRow(vals ...string) [][]byte {
 }
 
 func TestSlotQuery(t *testing.T) {
-	q := slotQuery("walx_a")
-	require.Contains(t, q, "FROM pg_replication_slots WHERE slot_name = 'walx_a'")
-	require.Contains(t, q, "invalidation_reason")
+	tests := []struct {
+		name     string
+		slot     string
+		contains []string
+	}{
+		{name: "plain", slot: "walx_a", contains: []string{"FROM pg_replication_slots WHERE slot_name = 'walx_a'", "invalidation_reason"}},
+		{name: "quote is doubled", slot: "a'b", contains: []string{"slot_name = 'a''b'"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			q := slotQuery(tt.slot)
+			for _, want := range tt.contains {
+				require.Contains(t, q, want)
+			}
+		})
+	}
 }
 
 func TestParseSlot(t *testing.T) {

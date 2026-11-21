@@ -117,28 +117,38 @@ func TestLostSlotIntegration(t *testing.T) {
 	require.NoError(t, err)
 	defer admin.Close(ctx)
 
-	c := connect(t, ctx, url)
-	_, err = EnsureSlot(ctx, c.PgConn(), "s_lost", true)
-	require.NoError(t, err)
-	_, err = admin.Exec(ctx, `CREATE TABLE t (id int primary key); CREATE PUBLICATION p FOR TABLE t`)
-	require.NoError(t, err)
-	setServerSetting(t, url, "max_slot_wal_keep_size", "32MB")
-
-	status := ""
-	for i := 0; i < 30 && status != "lost"; i++ {
-		for _, stmt := range []string{`INSERT INTO t VALUES (` + strconv.Itoa(i) + `)`, `SELECT pg_switch_wal()`, `CHECKPOINT`} {
-			_, err = admin.Exec(ctx, stmt)
+	tests := []struct {
+		name string
+		run  func(t *testing.T)
+	}{
+		{name: "a slot that falls behind max_slot_wal_keep_size is reported lost", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			_, err := EnsureSlot(ctx, c.PgConn(), "s_lost", true)
 			require.NoError(t, err)
-		}
-		require.NoError(t, admin.QueryRow(ctx,
-			`SELECT coalesce(wal_status, '') FROM pg_replication_slots WHERE slot_name = 's_lost'`).Scan(&status))
+			_, err = admin.Exec(ctx, `CREATE TABLE t (id int primary key); CREATE PUBLICATION p FOR TABLE t`)
+			require.NoError(t, err)
+			setServerSetting(t, url, "max_slot_wal_keep_size", "32MB")
+
+			status := ""
+			for i := 0; i < 30 && status != "lost"; i++ {
+				for _, stmt := range []string{`INSERT INTO t VALUES (` + strconv.Itoa(i) + `)`, `SELECT pg_switch_wal()`, `CHECKPOINT`} {
+					_, err = admin.Exec(ctx, stmt)
+					require.NoError(t, err)
+				}
+				require.NoError(t, admin.QueryRow(ctx,
+					`SELECT coalesce(wal_status, '') FROM pg_replication_slots WHERE slot_name = 's_lost'`).Scan(&status))
+			}
+			require.Equal(t, "lost", status)
+
+			_, err = EnsureSlot(ctx, c.PgConn(), "s_lost", true)
+			require.ErrorIs(t, err, ErrSlotLost)
+
+			fresh := connect(t, ctx, url)
+			err = StartStream(ctx, fresh.PgConn(), "s_lost", "p", 0)
+			require.ErrorIs(t, err, ErrSlotLost)
+		}},
 	}
-	require.Equal(t, "lost", status)
-
-	_, err = EnsureSlot(ctx, c.PgConn(), "s_lost", true)
-	require.ErrorIs(t, err, ErrSlotLost)
-
-	fresh := connect(t, ctx, url)
-	err = StartStream(ctx, fresh.PgConn(), "s_lost", "p", 0)
-	require.ErrorIs(t, err, ErrSlotLost)
+	for _, tt := range tests {
+		t.Run(tt.name, tt.run)
+	}
 }
