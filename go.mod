@@ -1,6 +1,6 @@
 module github.com/benipranata/walx
 
-go 1.27.4
+go 1.27
 
 require (
 	github.com/jackc/pglogrepl v0.0.0-20261111174325-d50336b09c47
