@@ -40,6 +40,10 @@ type Config struct {
 	// OnPermanentError is "stop" (default) or "skip": skip logs, counts and
 	// confirms a batch the sink rejected with event.Permanent.
 	OnPermanentError string
+
+	// ShutdownTimeout bounds how long a cancelled Run waits for the in-flight
+	// sink call; 30s when <= 0.
+	ShutdownTimeout time.Duration
 }
 
 // Engine runs one database pipeline: a reader goroutine decodes the stream
@@ -56,7 +60,9 @@ type Engine struct {
 
 	pending atomic.Int64 // batches queued or being delivered
 
+	stop   context.Context                                  // the Run context; ends retry waits, nil outside Run
 	sleep  func(ctx context.Context, d time.Duration) error // retry wait, a fake clock in tests
+	timer  func(d time.Duration) (<-chan time.Time, func()) // shutdown deadline, a fake in tests
 	jitter func(d time.Duration) time.Duration
 }
 
@@ -72,6 +78,7 @@ func New(cfg Config) *Engine {
 	e := &Engine{cfg: cfg, log: log.With("db", cfg.Name)}
 	e.decode = e.decodeMessage
 	e.sleep = sleepCtx
+	e.timer = realTimer
 	e.jitter = jitterBackoff
 	if cfg.Metrics == nil {
 		e.cfg.Metrics = event.NopMetrics{}
@@ -84,10 +91,16 @@ func New(cfg Config) *Engine {
 
 // Run streams until ctx is done or a stage fails, and returns the first
 // error: ctx.Err() on cancellation, the stream or decode error, or the sink
-// error. It returns only after every goroutine has stopped.
+// error. It returns only after every goroutine has stopped, and closes the
+// sink exactly once. See shutdown.go for what a stop waits for.
 func (e *Engine) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	e.stop = ctx
+	// The source outlives ctx until the deliverer is done, so its final
+	// status update carries the last confirmed LSN.
+	srcCtx, cancelSrc := context.WithCancel(context.WithoutCancel(ctx))
+	defer cancelSrc()
 
 	var (
 		wg    sync.WaitGroup
@@ -104,7 +117,7 @@ func (e *Engine) Run(ctx context.Context) error {
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		if err := e.cfg.Source.Run(ctx); err != nil {
+		if err := e.cfg.Source.Run(srcCtx); err != nil && !(srcCtx.Err() != nil && errors.Is(err, srcCtx.Err())) {
 			fail(err)
 		}
 	}()
@@ -117,11 +130,13 @@ func (e *Engine) Run(ctx context.Context) error {
 	}()
 	go func() {
 		defer wg.Done()
+		defer cancelSrc()
 		if err := e.deliver(ctx, queue); err != nil {
 			fail(err)
 		}
 	}()
 	wg.Wait()
+	e.closeSink(first)
 
 	if first == nil {
 		first = ctx.Err()
@@ -185,11 +200,14 @@ func (e *Engine) decodeMessage(xld pglogrepl.XLogData) (*event.Batch, error) {
 // confirmed only after send returns nil.
 func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 	for {
+		if ctx.Err() != nil {
+			return nil
+		}
 		select {
 		case <-ctx.Done():
 			return nil
 		case b, ok := <-queue:
-			if !ok {
+			if !ok || ctx.Err() != nil {
 				return nil
 			}
 			if e.cfg.Filter != nil {
@@ -200,7 +218,11 @@ func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 				e.pending.Add(-1)
 				continue
 			}
-			if err := e.send(ctx, b); err != nil {
+			if err := e.sendInFlight(ctx, b); err != nil {
+				if errors.Is(err, ErrShutdownTimeout) {
+					e.log.Error("shutdown timed out", "commit_lsn", b.CommitLSN.String(), "end_lsn", b.EndLSN.String(), "err", err)
+					return err
+				}
 				if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
 					return nil
 				}

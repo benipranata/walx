@@ -225,6 +225,32 @@ func TestEngineIntegration(t *testing.T) {
 			}
 			p.stop(t)
 		}},
+		{name: "cancel mid-call finishes the call and confirms its end LSN", run: func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			sink := &memSink{gate: make(chan struct{})}
+			p := startPipeline(t, ctx, url, "s_shutdown", sink, 4, nil)
+			before := slotFlush(t, ctx, admin, "s_shutdown")
+			for i := 1; i <= 3; i++ {
+				_, err := admin.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+4000)
+				require.NoError(t, err)
+			}
+			require.Eventually(t, func() bool { return p.decoded() >= 1 }, 10*time.Second, 10*time.Millisecond)
+			p.cancel()
+			time.Sleep(200 * time.Millisecond)
+			close(sink.gate)
+			select {
+			case err := <-p.done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(10 * time.Second):
+				t.Fatal("engine did not stop")
+			}
+			bs := sink.Batches()
+			require.Len(t, bs, 1, "queued batches must not be sent after cancel")
+			want := pglogrepl.LSN(bs[0].EndLSN)
+			require.Greater(t, want, before)
+			require.Eventually(t, func() bool { return slotFlush(t, ctx, admin, "s_shutdown") == want },
+				10*time.Second, 50*time.Millisecond, "final status update did not confirm the in-flight batch")
+		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)

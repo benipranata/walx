@@ -30,7 +30,7 @@ func (e *Engine) withRetry(send func(context.Context, event.Batch) error) func(c
 		backoff := rc.Initial
 		for attempt := 1; ; attempt++ {
 			err := send(ctx, b)
-			if err == nil || event.IsPermanent(err) || ctx.Err() != nil {
+			if err == nil || event.IsPermanent(err) || ctx.Err() != nil || e.stopping() {
 				return err
 			}
 			switch rc.Policy {
@@ -45,7 +45,10 @@ func (e *Engine) withRetry(send func(context.Context, event.Batch) error) func(c
 			wait := e.jitter(backoff)
 			e.log.Warn("sink send failed, retrying", "attempt", attempt, "backoff", wait.String(),
 				"commit_lsn", b.CommitLSN.String(), "end_lsn", b.EndLSN.String(), "err", err)
-			if err := e.sleep(ctx, wait); err != nil {
+			wctx, release := e.waitCtx(ctx)
+			err = e.sleep(wctx, wait)
+			release()
+			if err != nil {
 				return err
 			}
 			backoff = min(backoff*backoffFactor, rc.Max)

@@ -241,24 +241,6 @@ func TestEngineRun(t *testing.T) {
 			cancel()
 			require.ErrorIs(t, wait(t, done), context.Canceled)
 		}},
-		{name: "cancel during a blocked send returns the context error", run: func(t *testing.T) {
-			ctx, cancel := context.WithCancel(context.Background())
-			src := newFakeSource()
-			entered := make(chan struct{})
-			sink := event.SinkFunc(func(ctx context.Context, b event.Batch) error {
-				close(entered)
-				<-ctx.Done()
-				return ctx.Err()
-			})
-			e := New(Config{Name: "a", Source: src, Sink: sink})
-			stubDecode(e)
-			done := runEngine(ctx, e)
-			feed(ctx, src, 1)
-			<-entered
-			cancel()
-			require.ErrorIs(t, wait(t, done), context.Canceled)
-			require.Empty(t, src.Confirmed())
-		}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)
