@@ -26,7 +26,7 @@ var (
 	// A name is embedded in Event.ID and the default slot and publication, so
 	// it is limited to what a slot name allows, minus upper case.
 	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
-	slotPattern = regexp.MustCompile(`^[a-z0-9_]+$`)
+	slotPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 )
 
 type reporter func(key, format string, args ...any)

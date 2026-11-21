@@ -43,6 +43,7 @@ func TestValidationErrors(t *testing.T) {
 		{"name starting with a digit", "databases:\n  - {name: 1db, postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].name"},
 		{"name too long for the default slot", "databases:\n  - {name: " + strings.Repeat("a", 59) + ", postgres: {url: \"postgres://u@h/d\"}, sink: {type: stdout}}\n", "databases[0].postgres.slot"},
 		{"explicit slot with invalid characters", mk("      slot: Bad-Slot\n", ""), "databases[0].postgres.slot"},
+		{"explicit slot starting with a digit", mk("      slot: 1abc\n", ""), "databases[0].postgres.slot"},
 		{"explicit slot too long", mk("      slot: "+strings.Repeat("s", 64)+"\n", ""), "databases[0].postgres.slot"},
 		{"publication too long", mk("      publication: "+strings.Repeat("p", 64)+"\n", ""), "databases[0].postgres.publication"},
 		{"zero max_tx_bytes", mk("      max_tx_bytes: 0\n", ""), "databases[0].postgres.max_tx_bytes"},
