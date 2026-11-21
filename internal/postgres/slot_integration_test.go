@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"strconv"
 	"testing"
 	"time"
 
@@ -119,8 +120,10 @@ func TestLostSlotIntegration(t *testing.T) {
 
 	status := ""
 	for i := 0; i < 30 && status != "lost"; i++ {
-		_, err = admin.Exec(ctx, `INSERT INTO t VALUES ($1); SELECT pg_switch_wal(); CHECKPOINT`, i)
-		require.NoError(t, err)
+		for _, stmt := range []string{`INSERT INTO t VALUES (` + strconv.Itoa(i) + `)`, `SELECT pg_switch_wal()`, `CHECKPOINT`} {
+			_, err = admin.Exec(ctx, stmt)
+			require.NoError(t, err)
+		}
 		require.NoError(t, admin.QueryRow(ctx,
 			`SELECT coalesce(wal_status, '') FROM pg_replication_slots WHERE slot_name = 's_lost'`).Scan(&status))
 	}
