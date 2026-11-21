@@ -190,10 +190,10 @@ func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name, doc, want string
 	}{
-		{"empty document", "", ""},
-		{"only a comment", "# only a comment\n", ""},
-		{"top level is a list", "- a\n- b\n", ""},
-		{"syntax error", "databases: [\n", ""},
+		{"empty document", "", "expected a YAML mapping at the top level"},
+		{"only a comment", "# only a comment\n", "expected a YAML mapping at the top level"},
+		{"top level is a list", "- a\n- b\n", "expected a YAML mapping at the top level"},
+		{"syntax error", "databases: [\n", "did not find expected node content"},
 		{"type error names the line", mk("", "    retry:\n      initial: soon\n"), "line "},
 		{"type error on a line without a key", mk("", "    tables:\n      - name: public.t\n        drop_columns:\n          - {a: 1}\n"), "line "},
 	}
