@@ -34,8 +34,8 @@ go test -race -cover ./...
 go test -race -run TestName ./internal/event/
 ```
 
-Integration tests use testcontainers Postgres 18 with `wal_level=logical` (needs Docker). Use goleak for goroutine-leak checks.
-They skip when Docker is unhealthy, so a green `go test` does not mean they ran. testcontainers needs a local socket or a tcp/unix `DOCKER_HOST`; it does not support `ssh://` contexts. On macOS use `python3` or `gofmt` for in-place edits (BSD `sed -i` needs a suffix).
+Integration tests need a Postgres 18 with `wal_level=logical` and skip unless `WALX_TEST_POSTGRES_URL` is set, so a green `go test` does not mean they ran. They know nothing about how it is run; `compose.dev.yaml` is one way (`docker compose -f compose.dev.yaml up -d --wait`, port 5432, then `WALX_TEST_POSTGRES_URL=postgres://walx:walx@localhost:5432/walx?sslmode=disable`). Use goleak for goroutine-leak checks.
+Each test gets a throwaway database; tests must drop cluster-wide objects (roles, physical slots) themselves. The standby and lost-slot tests leave `wal_sender_timeout` and `max_slot_wal_keep_size` altered on the server. If compose runs on a remote Docker context, forward the port locally. On macOS use `python3` or `gofmt` for in-place edits (BSD `sed -i` needs a suffix).
 
 ## Conventions
 
