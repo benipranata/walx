@@ -3,6 +3,7 @@ package event_test
 import (
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -11,18 +12,24 @@ import (
 
 func TestEventJSON(t *testing.T) {
 	e := event.Event{
-		ID:     "main-0/10-1",
-		Op:     event.OpUpdate,
-		Schema: "public",
-		Table:  "users",
-		Before: map[string]any{"id": 1},
-		After:  map[string]any{"id": 1, "bio": event.Unchanged},
+		ID:       "main-0/10-1",
+		Source:   "main",
+		Op:       event.OpUpdate,
+		Schema:   "public",
+		Table:    "users",
+		Before:   map[string]any{"id": 1},
+		After:    map[string]any{"id": 1, "bio": event.Unchanged},
+		Key:      map[string]any{"id": 1},
+		LSN:      16,
+		TxID:     7,
+		CommitTS: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
 	}
 	b, err := json.Marshal(e)
 	require.NoError(t, err)
 	require.JSONEq(t, `{
-		"id":"main-0/10-1","op":"update","schema":"public","table":"users",
-		"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}}
+		"id":"main-0/10-1","source":"main","op":"update","schema":"public","table":"users",
+		"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}},
+		"key":{"id":1},"lsn":16,"tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"
 	}`, string(b))
 }
 

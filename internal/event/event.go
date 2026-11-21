@@ -1,16 +1,24 @@
 package event
 
-import "reflect"
+import (
+	"reflect"
+	"time"
+)
 
 // Event is one row change. ID is "<name>-<commitLSN>-<seq>" and stays stable
-// across redelivery.
+// across redelivery. Source is the name of the databases entry it came from.
 type Event struct {
-	ID     string         `json:"id"`
-	Op     Op             `json:"op"`
-	Schema string         `json:"schema"`
-	Table  string         `json:"table"`
-	Before map[string]any `json:"before,omitempty"`
-	After  map[string]any `json:"after,omitempty"`
+	ID       string         `json:"id"`
+	Source   string         `json:"source"`
+	Op       Op             `json:"op"`
+	Schema   string         `json:"schema"`
+	Table    string         `json:"table"`
+	Before   map[string]any `json:"before,omitempty"`
+	After    map[string]any `json:"after,omitempty"`
+	Key      map[string]any `json:"key,omitempty"`
+	LSN      LSN            `json:"lsn"` // WALStart: informational, never an ordering key
+	TxID     uint32         `json:"tx_id"`
+	CommitTS time.Time      `json:"commit_ts"`
 }
 
 // Transition returns the value of col before and after the change. ok is
