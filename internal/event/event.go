@@ -17,7 +17,7 @@ type Event struct {
 	Before   map[string]any `json:"before,omitempty"`
 	After    map[string]any `json:"after,omitempty"`
 	Key      map[string]any `json:"key,omitempty"`
-	LSN      LSN            `json:"lsn"` // WALStart: informational, never an ordering key
+	LSN      LSN            `json:"lsn"` // WALStart as "X/Y": informational, never an ordering key
 	TxID     uint32         `json:"tx_id"`
 	CommitTS time.Time      `json:"commit_ts"`
 }

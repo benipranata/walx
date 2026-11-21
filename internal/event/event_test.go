@@ -34,7 +34,7 @@ func TestEventJSON(t *testing.T) {
 			`{
 				"id":"main-0/10-1","source":"main","op":"update","schema":"public","table":"users",
 				"before":{"id":1},"after":{"id":1,"bio":{"$unchanged":true}},
-				"key":{"id":1},"lsn":16,"tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"
+				"key":{"id":1},"lsn":"0/10","tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"
 			}`,
 		},
 	}
