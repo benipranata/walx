@@ -97,3 +97,59 @@ func TestStandbyIntegration(t *testing.T) {
 		t.Run(tt.name, tt.run)
 	}
 }
+
+func TestStandbyTimerIntegration(t *testing.T) {
+	url := startPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	admin, err := pgx.Connect(ctx, url)
+	require.NoError(t, err)
+	defer admin.Close(ctx)
+	_, err = admin.Exec(ctx, `CREATE TABLE t (id serial PRIMARY KEY)`)
+	require.NoError(t, err)
+	_, err = admin.Exec(ctx, `CREATE PUBLICATION p FOR TABLE t`)
+	require.NoError(t, err)
+	setServerSetting(t, url, "wal_sender_timeout", "3s")
+
+	// A consumer that stops reading also stops answering the server's
+	// keepalives, so only the status timer can keep the walsender alive.
+	tests := []struct {
+		name      string
+		slot      string
+		interval  time.Duration
+		wantAlive bool
+	}{
+		{name: "status timer keeps a stalled consumer connected", slot: "s_alive", interval: time.Second, wantAlive: true},
+		{name: "control: without status updates the server drops the consumer", slot: "s_dead", interval: time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := connect(t, ctx, url)
+			info, err := EnsureSlot(ctx, c.PgConn(), tt.slot, true)
+			require.NoError(t, err)
+			require.NoError(t, StartStream(ctx, c.PgConn(), tt.slot, "p", 0))
+			s, err := NewStandby(c.PgConn(), info.ConfirmedFlushLSN, tt.interval)
+			require.NoError(t, err)
+			rctx, rcancel := context.WithCancel(ctx)
+			done := make(chan error, 1)
+			go func() { done <- s.Run(rctx) }()
+
+			_, err = admin.Exec(ctx, `INSERT INTO t DEFAULT VALUES`)
+			require.NoError(t, err)
+			time.Sleep(6 * time.Second)
+
+			var pid *int
+			require.NoError(t, admin.QueryRow(ctx,
+				`SELECT active_pid FROM pg_replication_slots WHERE slot_name = $1`, tt.slot).Scan(&pid))
+			require.Equal(t, tt.wantAlive, pid != nil)
+
+			rcancel()
+			go func() {
+				for range s.Messages() {
+				}
+			}()
+			<-done
+		})
+	}
+}
