@@ -18,6 +18,8 @@ var (
 	ops             = []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate}
 )
 
+type reporter func(key, format string, args ...any)
+
 // validate checks the decoded config and reports every problem it finds.
 func (c *Config) validate() error {
 	var errs []error
@@ -76,8 +78,6 @@ func (c *Config) validate() error {
 	}
 	return errors.Join(errs...)
 }
-
-type reporter func(key, format string, args ...any)
 
 func validatePostgres(p PostgresConfig, key func(string) string, bad reporter) {
 	if p.URL == "" {
