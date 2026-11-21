@@ -65,6 +65,9 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 		_ = pg.Close(context.WithoutCancel(ctx))
 		return zero, fmt.Errorf("identify system: %w", err)
 	}
+	if c.pg != nil {
+		_ = c.pg.Close(context.WithoutCancel(ctx))
+	}
 	c.pg = pg
 	return sys, nil
 }

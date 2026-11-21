@@ -53,6 +53,17 @@ func TestConnIntegration(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, cfg.Database, sys.DBName)
 		}},
+		{name: "a second Connect closes the first connection", run: func(t *testing.T) {
+			c := New(config.PostgresConfig{URL: url}, config.RetryConfig{}, nil)
+			defer c.Close(ctx)
+			_, err := c.Connect(ctx)
+			require.NoError(t, err)
+			first := c.PgConn()
+			_, err = c.Connect(ctx)
+			require.NoError(t, err)
+			require.True(t, first.IsClosed())
+			require.False(t, c.PgConn().IsClosed())
+		}},
 		{name: "terminate backend resumes without loss", run: func(t *testing.T) {
 			_, err := admin.Exec(ctx, `CREATE TABLE t (id int primary key)`)
 			require.NoError(t, err)
