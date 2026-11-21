@@ -14,8 +14,6 @@ import (
 // DefaultPath is where the binary looks for the config when -config is unset.
 const DefaultPath = "./config.yaml"
 
-const defaultShutdownTimeout = 30 * time.Second
-
 // Config is the whole of config.yaml.
 type Config struct {
 	ShutdownTimeout time.Duration    `yaml:"shutdown_timeout"` // shared by all databases
