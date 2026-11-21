@@ -33,6 +33,16 @@ func (b *ByteSize) UnmarshalYAML(n *yaml.Node) error {
 	return nil
 }
 
+// String formats the size in the largest binary unit that divides it exactly.
+func (b ByteSize) String() string {
+	for i := 3; i >= 0; i-- {
+		if u := byteUnits[i]; int64(b) != 0 && int64(b)%u.size == 0 {
+			return fmt.Sprintf("%d%s", int64(b)/u.size, u.suffix)
+		}
+	}
+	return fmt.Sprintf("%dB", int64(b))
+}
+
 func parseByteSize(n *yaml.Node) (ByteSize, error) {
 	if n.Kind != yaml.ScalarNode {
 		return 0, fmt.Errorf("invalid byte size: expected a scalar")
@@ -49,14 +59,4 @@ func parseByteSize(n *yaml.Node) (ByteSize, error) {
 		return 0, fmt.Errorf("invalid byte size %q (want e.g. 256MiB)", n.Value)
 	}
 	return ByteSize(v * mult), nil
-}
-
-// String formats the size in the largest binary unit that divides it exactly.
-func (b ByteSize) String() string {
-	for i := 3; i >= 0; i-- {
-		if u := byteUnits[i]; int64(b) != 0 && int64(b)%u.size == 0 {
-			return fmt.Sprintf("%d%s", int64(b)/u.size, u.suffix)
-		}
-	}
-	return fmt.Sprintf("%dB", int64(b))
 }
