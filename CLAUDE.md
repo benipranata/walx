@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1, T3.2 and T3.7) and `internal/filter` op filtering (T4.1) exist; permanent errors, idle advance, shutdown, supervisor and sinks are not started.
+Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine run loop (`internal/engine`, T3.1, T3.2 and T3.7) and `internal/filter` op filtering (T4.1) exist; permanent errors (T3.3) are done; idle advance, shutdown, supervisor and sinks are not started.
 
 ## Architecture rules
 
@@ -36,6 +36,7 @@ Status: milestones M1 (config, connection, slot, publication, stream start, stan
 - Postgres: record decode fixtures with `WALX_RECORD_FIXTURES=1 go test -run TestRecordFixtureIntegration ./internal/postgres` (writes `testdata/*.json` via `pg_logical_slot_get_binary_changes`, session pinned to UTC); unit tests decode the stored files.
 - Postgres: under REPLICA IDENTITY FULL the Relation message flags every column as key, so `DecodeDML` falls back to the whole row; the identity check (T4.5) must pass the primary key in its `keys` map.
 - Engine: `pglogrepl.Parse` panics on an empty payload, so `decodeMessage` guards `len(WALData)==0`. The `send`, `confirm`, `empty` and `decode` func fields on `Engine` are the seams for T3.2 to T3.6; extend them instead of rewiring `deliver`. An empty retry policy behaves as `stop` in the engine; config defaults supply `forever`.
+- Engine: `withPermanent` wraps `withRetry`; skip returns nil so `deliver` confirms `EndLSN`; only `event.Permanent` is skippable; `events_skipped_total` counts events with label `database`.
 - Tests: a fake must not close a channel a feeder goroutine may still send on (panic); close only from the sender or leave it open.
 - Postgres tests: `pg_stat_replication.application_name` is empty for walx; join `pg_replication_slots.active_pid = pg_stat_replication.pid` to find its walsender.
 
@@ -49,6 +50,7 @@ go test -race -run TestName ./internal/event/
 ```
 
 Integration tests need a Postgres 18 with `wal_level=logical` and skip unless `WALX_TEST_POSTGRES_URL` is set, so a green `go test` does not mean they ran. They know nothing about how it is run; `compose.dev.yaml` is one way (`docker compose -f compose.dev.yaml up -d --wait`, port 5432, then `WALX_TEST_POSTGRES_URL=postgres://walx:walx@localhost:5432/walx?sslmode=disable`). Use goleak for goroutine-leak checks.
+Run engine tests with `-timeout 120s`: a test sink returning a plain error under policy `forever` retries forever.
 Each test gets a throwaway database; tests must drop cluster-wide objects (roles, physical slots) themselves. Change server-wide settings only through `setServerSetting`, which refuses a customised value and resets it afterwards. If compose runs on a remote Docker context, forward the port locally. On macOS use `python3` or `gofmt` for in-place edits (BSD `sed -i` needs a suffix).
 
 ## Conventions
