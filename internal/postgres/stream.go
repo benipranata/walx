@@ -31,8 +31,14 @@ func StartStream(ctx context.Context, pg *pgconn.PgConn, slot, publication strin
 func streamArgs(publication string) []string {
 	return []string{
 		"proto_version '1'",
-		"publication_names " + quoteLiteral(pgx.Identifier{publication}.Sanitize()),
+		"publication_names " + replLiteral(pgx.Identifier{publication}.Sanitize()),
 	}
+}
+
+// replLiteral quotes s for a replication command. Its scanner has no E”
+// strings, so a backslash stays literal and only a quote is doubled.
+func replLiteral(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
 func classifyStart(slot string, err error) error {

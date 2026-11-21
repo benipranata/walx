@@ -90,6 +90,14 @@ func TestSlotIntegration(t *testing.T) {
 			err = StartStream(ctx, third.PgConn(), "s_active", "p", 0)
 			require.ErrorIs(t, err, ErrSlotActive)
 		}},
+		{name: "start stream on a publication with a backslash in its name", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE PUBLICATION "a\b" FOR ALL TABLES`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			_, err = EnsureSlot(ctx, c.PgConn(), "s_bs", true)
+			require.NoError(t, err)
+			require.NoError(t, StartStream(ctx, c.PgConn(), "s_bs", `a\b`, 0))
+		}},
 		{name: "start stream on missing slot", run: func(t *testing.T) {
 			c := connect(t, ctx, url)
 			err := StartStream(ctx, c.PgConn(), "s_nope", "p", 0)

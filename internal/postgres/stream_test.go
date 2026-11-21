@@ -16,6 +16,7 @@ func TestStreamArgs(t *testing.T) {
 	}{
 		{name: "plain", pub: "walx_a", want: []string{"proto_version '1'", `publication_names '"walx_a"'`}},
 		{name: "quote and mixed case", pub: `P'x"`, want: []string{"proto_version '1'", `publication_names '"P''x"""'`}},
+		{name: "backslash is literal in the replication scanner", pub: `a\b`, want: []string{"proto_version '1'", `publication_names '"a\b"'`}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
