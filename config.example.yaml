@@ -1,0 +1,59 @@
+# walx example configuration. Every key is documented in docs/configuration.md.
+# Values written as ${NAME} are read from the environment; an unset variable is
+# a startup error. Keys that are commented out show their default.
+
+# How long a stopping pipeline waits for its in-flight sink call before it
+# exits without confirming that batch (it is redelivered on the next start).
+# Shared by all databases.
+shutdown_timeout: 30s            # default 30s
+
+# Prometheus endpoint and slot lag poller, shared by all databases.
+metrics:
+  listen: ":9187"                # host:port; empty (the default) disables /metrics
+  lag_interval: 15s              # default 15s: how often slot lag and wal_status are read
+
+databases:
+  # One pipeline per entry: its own connection, slot, sink, retry and checkpoint.
+  - name: orders                 # required, unique, ^[a-z][a-z0-9_]{0,57}$; becomes Event.Source
+    postgres:
+      url: ${ORDERS_DATABASE_URL}   # postgres:// or postgresql://; walx adds replication=database itself
+      # slot: walx_orders        # default walx_<name>; unique per server
+      # publication: walx_orders # default walx_<name>; unique per database
+      auto_create: true          # default true: create the slot and publication if missing
+      auto_replica_identity: true # default true: ALTER TABLE ... REPLICA IDENTITY FULL where Before is needed
+      auto_alter: false          # default false: ALTER PUBLICATION when it differs from the config
+      max_tx_bytes: 256MiB       # default 256MiB: raw tuple bytes of one transaction, not a memory limit
+      max_tx_events: 0           # default 0 (unlimited): events of one transaction
+    tables:
+      # With no tables the publication is FOR ALL TABLES (needs superuser)
+      # and every table is streamed.
+      - name: public.orders
+        ops: [insert, update, delete] # default [insert, update]; also truncate
+        fsm_column: status       # the new state is in the NATS subject and headers; kept by reference_only
+        where:                   # After must equal every pair (Before for deletes)
+          region: eu
+        on_change: [status, total_cents] # updates pass only when one of these columns changed
+        drop_columns: [internal_notes]   # removed from Before and After, never from the key
+        key: [order_number]      # default: the primary key
+      - name: public.audit_log   # defaults: ops [insert, update], primary key as key
+        reference_only: true     # no Before or After; only the key (and the fsm_column value)
+    sink:
+      type: nats                 # stdout | file | nats
+      url: nats://nats-1:4222,nats://nats-2:4222   # nats only; comma-separated list allowed
+      subject: cdc.{database}.{schema}.{table}.{token} # nats only; default cdc.{schema}.{table}.{token}
+      timeout: 10s               # default 0 (no deadline): bound of one Send call
+    retry:
+      policy: max_attempts       # default forever; also max_attempts, stop
+      initial: 100ms             # default 100ms
+      max: 30s                   # default 30s
+      max_attempts: 10           # default 0 (unlimited); total attempts for policy max_attempts
+    on_permanent_error: skip     # default stop; skip logs the whole batch and moves on
+
+  - name: billing
+    postgres:
+      url: ${BILLING_DATABASE_URL}
+    tables:
+      - name: public.invoices
+    sink:
+      type: file
+      path: /var/lib/walx/billing.jsonl   # file only; two file sinks must not share a path
