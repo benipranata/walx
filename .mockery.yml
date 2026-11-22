@@ -1,0 +1,15 @@
+# Mocks live in a package named `mock` inside the directory of the mocked
+# interface, never in the same package. Use mockery only for simple stubs and
+# call assertions; keep a hand-written fake for anything with state,
+# goroutines or channels.
+template: testify
+dir: "{{.InterfaceDir}}/mock"
+pkgname: mock
+filename: "mock_{{.InterfaceName}}.go"
+structname: "{{.Mock}}{{.InterfaceName}}"
+packages:
+  github.com/benipranata/walx/internal/event:
+    interfaces:
+      Metrics:
+      DeadLetter:
+      Sink:
