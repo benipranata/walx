@@ -13,8 +13,9 @@ import (
 	"github.com/benipranata/walx/internal/event"
 )
 
-// Chain drops events by table, op, on_change and where, and removes
-// drop_columns from the row images. It never mutates its input.
+// Chain drops events by table, op, on_change and where, removes
+// drop_columns from the row images and, last, strips reference_only tables.
+// It never mutates its input.
 type Chain struct {
 	name    string
 	tables  map[string]tableRule
@@ -31,6 +32,8 @@ type tableRule struct {
 	where    map[string]any
 	onChange []string
 	drop     []string
+	fsm      string
+	refOnly  bool
 }
 
 var defaultOps = []event.Op{event.OpInsert, event.OpUpdate}
@@ -59,7 +62,7 @@ func New(name string, tables []config.TableConfig, m event.Metrics, log *slog.Lo
 		if ops == nil {
 			ops = defaultOps
 		}
-		c.tables[t.Name] = tableRule{ops: ops, where: t.Where, onChange: t.OnChange, drop: t.DropColumns}
+		c.tables[t.Name] = tableRule{ops: ops, where: t.Where, onChange: t.OnChange, drop: t.DropColumns, fsm: t.FSMColumn, refOnly: t.ReferenceOnly}
 	}
 	return c
 }
@@ -72,7 +75,7 @@ func (c *Chain) Apply(b event.Batch) event.Batch {
 	for _, e := range b.Events {
 		ok, reason := c.keep(e)
 		if ok {
-			kept = append(kept, c.dropColumns(e))
+			kept = append(kept, c.reference(c.dropColumns(e)))
 			continue
 		}
 		c.drop(e, reason)
