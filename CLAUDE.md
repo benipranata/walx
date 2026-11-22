@@ -4,7 +4,7 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine (`internal/engine`: run loop, retry, permanent errors, idle advance, graceful shutdown, fault injection, supervisor) and `internal/filter` op filtering, `on_change`, `where`, `drop_columns` and `fsm_column` (T4.1 to T4.4) exist: M3 is complete (T3.1 to T3.8). The engine reconnects after a lost stream (`Config.NewSource`). Not started: sinks (M5), `cmd/walx` wiring (T6.2), metrics, remaining filters (T4.6+) and the REPLICA IDENTITY checks.
+Status: milestones M1 (config, connection, slot, publication, stream start, standby writer, `cmd/walx` snapshot stub) and M2 (`internal/postgres`: relation cache, pgoutput decoding, TOAST marker, transaction buffering, large-transaction cap, schema change; T2.1 to T2.6) are implemented; `internal/event` and `internal/config` too. The postgres integration tests run against a real Postgres 18 (see Commands). The engine (`internal/engine`: run loop, retry, permanent errors, idle advance, graceful shutdown, fault injection, supervisor) and `internal/filter` op filtering, `on_change`, `where`, `drop_columns`, `fsm_column`, `key` checks and `reference_only` (T4.1 to T4.6) exist: M3 and M4 are complete. The engine reconnects after a lost stream (`Config.NewSource`). Not started: sinks (M5), `cmd/walx` wiring (T6.2), metrics, the startup wiring of `EnsureReplicaIdentity` and `CheckKeys` (T6.2).
 
 ## Architecture rules
 
@@ -48,6 +48,8 @@ Status: milestones M1 (config, connection, slot, publication, stream start, stan
 - Engine tests: a `confirm` crash hook must delegate to the original until the batch under test reached the sink, since `confirmEmpty` and idle keepalives also call `confirm`. To restart on the same slot, close the first `Conn` and wait for `pg_replication_slots.active` to turn false, else `ErrSlotActive`. Slot names must be lowercase (uppercase gives a misleading "slot does not exist"). Check a crash test by mutation: if the hook also calls the original, the redelivery test must fail.
 - Tests: a fake must not close a channel a feeder goroutine may still send on (panic); close only from the sender or leave it open.
 - Postgres tests: `pg_stat_replication.application_name` is empty for walx; join `pg_replication_slots.active_pid = pg_stat_replication.pid` to find its walsender.
+- Postgres: `CheckKeys` (startup, T4.6) fails with `ErrKey` on a missing table or key column and warns when no plain unique index (no predicate or expression) has all its columns inside the key. The uncovered-identity check for delete-enabled tables is `EnsureReplicaIdentity`, not repeated there.
+- Filter: `reference_only` runs last in `Chain.Apply` (`filter/key.go`): Before and After are nil, Key stays, and After holds only the `fsm_column` value (After, else Before when Unchanged; none on a delete).
 
 ## Commands
 
