@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check go.mod and go.sum are tidy
+        run: go mod tidy -diff
+      - name: Check formatting
+        run: test -z "$(gofmt -l .)"
+      - name: Test scripts
+        run: sh scripts/changed-coverage_test.sh
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Test
+        run: go test -race -covermode=atomic -coverprofile=coverage.out -timeout 300s ./...
+      - name: Coverage
+        run: |
+          go tool cover -func=coverage.out
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Total: **$total**" >> "$GITHUB_STEP_SUMMARY"
+      - name: Coverage of changed files
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          {
+            echo
+            echo "### Changed files"
+            scripts/changed-coverage.sh coverage.out "origin/$BASE_REF"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
