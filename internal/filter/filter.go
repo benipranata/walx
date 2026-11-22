@@ -5,8 +5,11 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"math/big"
 	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/benipranata/walx/internal/config"
@@ -158,8 +161,18 @@ func matchWhere(e *event.Event, where map[string]any) bool {
 
 // equalValue compares a decoded column value with a YAML scalar. Numbers
 // compare by value across Go types, since the decoder gives int64 and float
-// while YAML gives int and float64.
+// while YAML gives int and float64. The decoder returns numeric as a string,
+// so a string value also equals a configured number with the same decimal
+// value ("10.50" equals 10.5); a non-numeric string never does. Events carry
+// no column types, so a text column holding "5" also matches `where: {c: 5}`
+// (known trade-off); a configured string always compares as a string.
 func equalValue(got, want any) bool {
+	if s, ok := got.(string); ok {
+		if w, ok := numberRat(want); ok {
+			g, ok := decimalRat(s)
+			return ok && g.Cmp(w) == 0
+		}
+	}
 	if g, ok := asInt(got); ok {
 		if w, ok := asInt(want); ok {
 			return g == w
@@ -171,6 +184,39 @@ func equalValue(got, want any) bool {
 		}
 	}
 	return reflect.DeepEqual(got, want)
+}
+
+// numberRat converts a configured integer or float to an exact value. A float
+// goes through its shortest decimal form, so 0.1 equals "0.1".
+func numberRat(v any) (*big.Rat, bool) {
+	if i, ok := asInt(v); ok {
+		return new(big.Rat).SetInt64(i), true
+	}
+	var text string
+	switch n := v.(type) {
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) {
+			return nil, false
+		}
+		text = strconv.FormatFloat(n, 'f', -1, 64)
+	case float32:
+		if math.IsNaN(float64(n)) || math.IsInf(float64(n), 0) {
+			return nil, false
+		}
+		text = strconv.FormatFloat(float64(n), 'f', -1, 32)
+	default:
+		return nil, false
+	}
+	return new(big.Rat).SetString(text)
+}
+
+// decimalRat parses a plain decimal such as "-10.50". Exponents, fractions and
+// NaN are rejected, so a text value cannot cost more than its length.
+func decimalRat(s string) (*big.Rat, bool) {
+	if s == "" || strings.Trim(s, "+-.0123456789") != "" {
+		return nil, false
+	}
+	return new(big.Rat).SetString(s)
 }
 
 func asInt(v any) (int64, bool) {
