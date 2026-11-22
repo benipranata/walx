@@ -93,8 +93,12 @@ func New(cfg Config) *Engine {
 
 // Run streams until ctx is done or a stage fails, and returns the first
 // error: ctx.Err() on cancellation, the stream or decode error, or the sink
-// error. It returns only after every goroutine has stopped, and closes the
-// sink exactly once. See shutdown.go for what a stop waits for.
+// error. A sink error that arrives after a stop (the call fails, or retry
+// stops after a failed attempt) is returned instead of context.Canceled; a
+// stop during retry backoff returns context.Canceled. It
+// returns only after every goroutine has stopped and closes the sink exactly
+// once, except after ErrShutdownTimeout: then an abandoned sink goroutine and
+// an unawaited Close may outlive Run. See shutdown.go.
 func (e *Engine) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
