@@ -4,7 +4,7 @@ walx is a standalone executable that turns the Postgres write-ahead log (logical
 
 The one rule: a sink returns `nil` only when the batch is durable at the destination, and only then does walx confirm the WAL position. A crash or a failing sink therefore repeats events rather than losing them, so consumers must dedupe by `Event.ID` (see [events](docs/events.md)).
 
-Requires Postgres 18 or later. `walx snapshot` backfills the current rows of a database through the same filters and sink (see [operations](docs/operations.md#snapshot)).
+Requires Postgres 18 or later. `walx version` prints the build version. `walx snapshot` backfills the current rows of a database through the same filters and sink (see [operations](docs/operations.md#snapshot)).
 
 ## Quick start
 
@@ -22,7 +22,7 @@ Requires Postgres 18 or later. `walx snapshot` backfills the current rows of a d
          type: stdout
    ```
 
-3. Build and run:
+3. Build and run (or use the [Docker image](#docker) or a binary from the GitHub Releases page):
 
    ```
    go build -o walx ./cmd/walx
@@ -42,7 +42,13 @@ docker run --rm \
   pewara/walx:v0.1.0
 ```
 
-Tags are `vX.Y.Z` and `latest`; pin a version in production. A file sink or dead-letter file needs a writable volume the non-root user can write to. Release binaries for linux and darwin are on the GitHub Releases page.
+Notes:
+
+- Tags are `vX.Y.Z` and `latest`; pin a version in production.
+- `host.docker.internal` works on Docker Desktop. On Linux add `--add-host=host.docker.internal:host-gateway`, or use the server's address.
+- Publish the metrics port (`-p 9187:9187`) if `metrics.listen` is set, and bind it to `:9187` inside the container, not `127.0.0.1`.
+- A file sink or dead-letter file needs a writable volume the non-root user can write to.
+- The image has no shell. Release binaries for linux and darwin (amd64, arm64) with `checksums.txt` are on the GitHub Releases page.
 
 ## Documentation
 
