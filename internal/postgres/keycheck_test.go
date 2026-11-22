@@ -26,8 +26,21 @@ func TestKeyChecksIntegration(t *testing.T) {
 		CREATE UNIQUE INDEX loose_partial ON loose (tag) WHERE tag IS NOT NULL;
 		CREATE TABLE cover (id int primary key, a text not null, b text not null);
 		CREATE UNIQUE INDEX cover_a ON cover (a);
-		CREATE TABLE pair (id int primary key, a text not null, b text not null, UNIQUE (a, b))`)
+		CREATE TABLE pair (id int primary key, a text not null, b text not null, UNIQUE (a, b));
+			CREATE TABLE incl (id int not null, name text);
+			CREATE UNIQUE INDEX incl_id ON incl (id) INCLUDE (name);
+			CREATE TABLE nullable (id int primary key, tag text unique);
+			CREATE TABLE nulls_not_distinct (id int primary key, tag text);
+			CREATE UNIQUE INDEX nnd_tag ON nulls_not_distinct (tag) NULLS NOT DISTINCT;
+			CREATE TABLE mixed (id int primary key, a text not null, b text, UNIQUE (a, b));
+			CREATE TABLE expr (id int primary key, tag text not null);
+			CREATE UNIQUE INDEX expr_lower ON expr (lower(tag));
+			CREATE TABLE broken (id int primary key, tag text not null);
+			INSERT INTO broken VALUES (1, 'x'), (2, 'x')`)
 	require.NoError(t, err)
+	// A failed concurrent build leaves an invalid unique index behind.
+	_, err = admin.Exec(ctx, `CREATE UNIQUE INDEX CONCURRENTLY broken_tag ON broken (tag)`)
+	require.Error(t, err)
 
 	keyed := func(name string, ops []event.Op, key ...string) config.TableConfig {
 		return config.TableConfig{Name: name, Ops: ops, Key: key}
@@ -52,6 +65,13 @@ func TestKeyChecksIntegration(t *testing.T) {
 		{"no unique index warns", db(true, keyed("public.two", nil, "note")), "", []string{"public.two"}},
 		{"partial index does not count", db(true, keyed("public.loose", nil, "tag")), "", []string{"public.loose"}},
 		{"part of a composite unique index warns", db(true, keyed("public.pair", nil, "a")), "", []string{"public.pair"}},
+		{"include column is not part of the key", db(true, keyed("public.incl", nil, "id")), "", nil},
+		{"unique on a nullable column warns", db(true, keyed("public.nullable", nil, "tag")), "", []string{"public.nullable"}},
+		{"nullable unique with nulls not distinct is covered", db(true, keyed("public.nulls_not_distinct", nil, "tag")), "", nil},
+		{"composite index with a nullable column warns", db(true, keyed("public.mixed", nil, "a", "b")), "", []string{"public.mixed"}},
+		{"expression index does not count", db(true, keyed("public.expr", nil, "tag")), "", []string{"public.expr"}},
+		{"invalid index does not count", db(true, keyed("public.broken", nil, "tag")), "", []string{"public.broken"}},
+		{"not null unique is covered", db(true, keyed("public.two", nil, "email")), "", nil},
 		{"unlisted columns of a covering key", db(true, keyed("public.loose", nil, "id", "other")), "", nil},
 	}
 	for _, tt := range tests {

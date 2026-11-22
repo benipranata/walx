@@ -18,8 +18,10 @@ var ErrKey = errors.New("key")
 // CheckKeys validates the custom key of every listed table: each key column
 // must exist (error wrapping ErrKey), and a warning is returned for a key no
 // unique index covers, since the row it names may then not be unique. An
-// index covers a key when all its columns are key columns. A delete whose key
-// lies outside the replica identity is checked by EnsureReplicaIdentity.
+// index covers a key when all its key columns (not INCLUDE columns) are key
+// columns and NULLs cannot repeat in it (NOT NULL columns or NULLS NOT DISTINCT).
+// A delete whose key lies outside the replica identity is checked by
+// EnsureReplicaIdentity.
 func CheckKeys(ctx context.Context, pg *pgconn.PgConn, db config.DatabaseConfig) (warnings []string, err error) {
 	for _, t := range db.Tables {
 		if len(t.Key) == 0 {
@@ -38,14 +40,16 @@ func CheckKeys(ctx context.Context, pg *pgconn.PgConn, db config.DatabaseConfig)
 			return len(u) > 0 && !slices.ContainsFunc(u, func(c string) bool { return !slices.Contains(t.Key, c) })
 		})
 		if !covered {
-			warnings = append(warnings, fmt.Sprintf("table %s: no unique index covers key (%s), so it may not identify one row", t.Name, strings.Join(t.Key, ", ")))
+			warnings = append(warnings, fmt.Sprintf("table %s: no unique index on NOT NULL columns (or NULLS NOT DISTINCT) covers key (%s), so it may not identify one row", t.Name, strings.Join(t.Key, ", ")))
 		}
 	}
 	return warnings, nil
 }
 
 // readKeyInfo returns the live columns of the table and the column lists of
-// its plain unique indexes (no expression, no predicate).
+// its unique indexes that enforce uniqueness: plain (no expression, no
+// predicate), valid, listing only key columns (INCLUDE columns are ignored),
+// and either primary, NULLS NOT DISTINCT or with every column NOT NULL.
 func readKeyInfo(ctx context.Context, pg *pgconn.PgConn, name string) (cols []string, uniques [][]string, err error) {
 	lit := quoteLiteral(name)
 	rows, err := query(ctx, pg, "SELECT a.attname::text FROM pg_attribute a JOIN pg_class c ON c.oid = a.attrelid "+
@@ -60,11 +64,14 @@ func readKeyInfo(ctx context.Context, pg *pgconn.PgConn, name string) (cols []st
 	for _, r := range rows {
 		cols = append(cols, str(r[0]))
 	}
-	rows, err = query(ctx, pg, "SELECT string_agg(a.attname::text, chr(31) ORDER BY a.attnum) FROM pg_index i "+
+	rows, err = query(ctx, pg, "SELECT string_agg(a.attname::text, chr(31) ORDER BY k.ord) FROM pg_index i "+
 		"JOIN pg_class c ON c.oid = i.indrelid JOIN pg_namespace n ON n.oid = c.relnamespace "+
-		"JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey) "+
+		"CROSS JOIN LATERAL unnest(i.indkey::int2[]) WITH ORDINALITY AS k(attnum, ord) "+
+		"JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = k.attnum "+
 		"WHERE n.nspname || '.' || c.relname = "+lit+" AND i.indisunique AND i.indpred IS NULL AND i.indexprs IS NULL "+
-		"AND i.indisvalid GROUP BY i.indexrelid")
+		"AND i.indisvalid AND k.ord <= i.indnkeyatts "+
+		"GROUP BY i.indexrelid, i.indisprimary, i.indnullsnotdistinct "+
+		"HAVING i.indisprimary OR i.indnullsnotdistinct OR bool_and(a.attnotnull)")
 	if err != nil {
 		return nil, nil, fmt.Errorf("read unique indexes of %s: %w", name, err)
 	}
