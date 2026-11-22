@@ -118,5 +118,5 @@ Never mention the plan (task IDs like `T4.5`, milestones like `M4`, "the plan") 
 
 ## Release
 
-- Tag `vX.Y.Z` on `main` triggers `.github/workflows/release.yml`: tests, then linux/darwin (amd64, arm64) tarballs plus `checksums.txt` on a GitHub Release, and a multi-arch image `<DOCKERHUB_USERNAME>/walx` (`:vX.Y.Z`, `:latest`). Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+- Tag `vX.Y.Z` on `main` triggers `.github/workflows/release.yml`: tests, then linux/darwin (amd64, arm64) tarballs plus `checksums.txt` on a GitHub Release, and a multi-arch image `pewara/walx` on Docker Hub (`DOCKERHUB_USERNAME`) (`:vX.Y.Z`, `:latest`). Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
 - The version comes from `-ldflags "-X main.version=..."` (default `dev`; `walx version`). Builds use `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`; the `Dockerfile` is multi-stage onto `distroless/static:nonroot` (config at `/etc/walx/config.yaml`).

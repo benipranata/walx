@@ -31,6 +31,19 @@ Requires Postgres 18 or later. `walx snapshot` backfills the current rows of a d
 
 walx creates the slot and publication on first start, then prints one JSON line per change to stdout. Logs go to stderr. Stop it with SIGINT or SIGTERM.
 
+### Docker
+
+The image is [pewara/walx](https://hub.docker.com/r/pewara/walx) on Docker Hub (linux/amd64 and linux/arm64, distroless, runs as non-root). It reads the config from `/etc/walx/config.yaml`:
+
+```
+docker run --rm \
+  -v "$PWD/config.yaml:/etc/walx/config.yaml:ro" \
+  -e ORDERS_DATABASE_URL='postgres://walx:walx@host.docker.internal:5432/walx?sslmode=disable' \
+  pewara/walx:v0.1.0
+```
+
+Tags are `vX.Y.Z` and `latest`; pin a version in production. A file sink or dead-letter file needs a writable volume the non-root user can write to. Release binaries for linux and darwin are on the GitHub Releases page.
+
 ## Documentation
 
 | File | Content |
