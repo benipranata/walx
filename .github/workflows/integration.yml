@@ -1,0 +1,72 @@
+name: Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      WALX_TEST_POSTGRES_URL: postgres://walx:walx@localhost:5432/walx?sslmode=disable
+      WALX_TEST_NATS_URL: nats://localhost:4222
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start Postgres and NATS
+        run: |
+          docker compose -f compose.dev.yaml up -d --wait
+          # the nats healthcheck only proves the binary exists, so wait for the port
+          for _ in $(seq 30); do
+            (exec 3<>/dev/tcp/127.0.0.1/4222) 2>/dev/null && exit 0
+            sleep 1
+          done
+          echo "::error::nats did not listen on 4222"
+          exit 1
+      - name: Test
+        run: go test -v -race -count=1 -p 1 -timeout 600s -covermode=atomic -coverprofile=coverage.out ./... 2>&1 | tee test.log
+      - name: Check integration tests ran
+        run: |
+          if grep -E '^\s*--- SKIP: .*Integration' test.log; then
+            echo "::error::integration tests were skipped"
+            exit 1
+          fi
+          for t in TestSmokeIntegration TestLagIntegration TestEngineIntegration TestJetStreamIntegration; do
+            grep -q -- "^--- PASS: $t " test.log || { echo "::error::$t did not pass"; exit 1; }
+          done
+      - name: Coverage
+        if: always()
+        run: |
+          test -f coverage.out || exit 0
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "### Integration coverage" >> "$GITHUB_STEP_SUMMARY"
+          echo "Total: **$total**" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-results
+          path: |
+            coverage.out
+            test.log
+          if-no-files-found: ignore
+      - name: Compose logs
+        if: failure()
+        run: docker compose -f compose.dev.yaml logs
+      - name: Stop services
+        if: always()
+        run: docker compose -f compose.dev.yaml down -v
