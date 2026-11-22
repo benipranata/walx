@@ -55,6 +55,12 @@ type Config struct {
 	// confirms a batch the sink rejected with event.Permanent.
 	OnPermanentError string
 
+	// DeadLetter receives the batches skipped under on_permanent_error: skip
+	// and is retried like the sink. A skip is confirmed only after it returns
+	// nil. Nil keeps the batch only in the error log. Run closes it after the
+	// sink.
+	DeadLetter event.DeadLetter
+
 	// ShutdownTimeout bounds how long a cancelled Run waits for the in-flight
 	// sink call; 30s when <= 0.
 	ShutdownTimeout time.Duration

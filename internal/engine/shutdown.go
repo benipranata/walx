@@ -65,14 +65,19 @@ func (e *Engine) waitCtx(ctx context.Context) (context.Context, func()) {
 	return wctx, func() { unhook(); cancel() }
 }
 
-// closeSink closes the sink after the in-flight call is done. After a
-// shutdown timeout the call may still be stuck and Close may block too, so it
+// closeSink closes the sink, then the dead-letter store, after the in-flight
+// call is done. After a shutdown timeout the call may still be stuck and Close may block too, so it
 // runs unawaited then. The flag is separate from the returned error because
 // Run keeps only the first error, which may not be the timeout.
 func (e *Engine) closeSink() {
 	closeIt := func() {
 		if err := e.cfg.Sink.Close(); err != nil {
 			e.log.Error("sink close failed", "err", err)
+		}
+		if dl := e.cfg.DeadLetter; dl != nil {
+			if err := dl.Close(); err != nil {
+				e.log.Error("dead-letter close failed", "err", err)
+			}
 		}
 	}
 	if e.timedOut.Load() {
