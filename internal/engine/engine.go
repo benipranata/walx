@@ -37,6 +37,20 @@ type Config struct {
 	Logger    *slog.Logger       // discards when nil
 	Metrics   event.Metrics      // discards when nil
 
+	// NewSource starts a fresh stream after the current Source failed; nil
+	// disables reconnecting, so a Source error ends Run. resume is the highest
+	// LSN the engine delivered and confirmed, or 0 before the first confirm.
+	// The factory reconnects (postgres.Conn.Reconnect, which also resets the
+	// relation cache), checks the slot, starts streaming at resume and returns
+	// a Standby seeded with max(slot confirmed_flush_lsn, resume). It checks the
+	// slot without auto-create, so a slot dropped meanwhile ends Run with
+	// ErrSlotMissing instead of being recreated past the lost WAL. It closes
+	// the failed connection. Any error it returns is retried with backoff
+	// unless postgres.IsFatal or permanent, so it must not retry fatal errors
+	// itself; postgres.ErrSlotActive is retried here but is fatal at first
+	// start, which the caller does before New.
+	NewSource func(ctx context.Context, resume pglogrepl.LSN) (Source, error)
+
 	// OnPermanentError is "stop" (default) or "skip": skip logs, counts and
 	// confirms a batch the sink rejected with event.Permanent.
 	OnPermanentError string
@@ -58,7 +72,12 @@ type Engine struct {
 	confirm func(lsn event.LSN)
 	empty   func(b event.Batch)
 
-	pending atomic.Int64 // batches queued or being delivered
+	pending atomic.Int64  // batches queued or being delivered
+	idle    chan struct{} // signalled when pending drops to 0
+
+	srcRuns   sync.WaitGroup         // source Run goroutines
+	cur       atomic.Pointer[Source] // the source confirms go to
+	confirmed atomic.Uint64          // highest LSN confirmed, the resume point after a reconnect
 
 	timedOut atomic.Bool // the shutdown timeout fired on an in-flight sink call
 
@@ -77,7 +96,8 @@ func New(cfg Config) *Engine {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	e := &Engine{cfg: cfg, log: log.With("db", cfg.Name)}
+	e := &Engine{cfg: cfg, log: log.With("db", cfg.Name), idle: make(chan struct{}, 1)}
+	e.setSource(cfg.Source)
 	e.decode = e.decodeMessage
 	e.sleep = sleepCtx
 	e.timer = realTimer
@@ -86,7 +106,7 @@ func New(cfg Config) *Engine {
 		e.cfg.Metrics = event.NopMetrics{}
 	}
 	e.send = e.withPermanent(e.withRetry(cfg.Sink.Send))
-	e.confirm = func(lsn event.LSN) { cfg.Source.SetConfirmed(pglogrepl.LSN(lsn)) }
+	e.confirm = e.confirmToSource
 	e.empty = e.confirmEmpty
 	return e
 }
@@ -120,17 +140,11 @@ func (e *Engine) Run(ctx context.Context) error {
 	queue := make(chan event.Batch, e.cfg.QueueSize)
 
 	e.log.Info("engine started", "queue_size", e.cfg.QueueSize)
-	wg.Add(3)
-	go func() {
-		defer wg.Done()
-		if err := e.cfg.Source.Run(srcCtx); err != nil && !(srcCtx.Err() != nil && errors.Is(err, srcCtx.Err())) {
-			fail(err)
-		}
-	}()
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		defer close(queue)
-		if err := e.read(ctx, queue); err != nil {
+		if err := e.stream(ctx, srcCtx, queue); err != nil {
 			fail(err)
 		}
 	}()
@@ -142,6 +156,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}()
 	wg.Wait()
+	e.srcRuns.Wait()
 	e.closeSink()
 
 	if first == nil {
@@ -155,15 +170,19 @@ func (e *Engine) Run(ctx context.Context) error {
 	return first
 }
 
-// read decodes stream messages into queue. A full queue blocks it, which
-// stops it taking from the Source; Standby keeps answering the server.
-func (e *Engine) read(ctx context.Context, queue chan<- event.Batch) error {
-	msgs := e.cfg.Source.Messages()
-	kas := e.cfg.Source.Keepalives()
+// read decodes stream messages into queue until ctx ends, a decode error
+// occurs or src's Run returns (runErr, reported as *sourceError). A full queue blocks it, which stops
+// it taking from the Source; Standby keeps answering the server. progressed
+// reports whether any message arrived.
+func (e *Engine) read(ctx context.Context, src Source, queue chan<- event.Batch, runErr <-chan error) (progressed bool, err error) {
+	msgs := src.Messages()
+	kas := src.Keepalives()
 	for {
 		select {
 		case <-ctx.Done():
-			return nil
+			return progressed, nil
+		case err := <-runErr:
+			return progressed, &sourceError{err}
 		case lsn, ok := <-kas:
 			if !ok {
 				kas = nil
@@ -172,11 +191,13 @@ func (e *Engine) read(ctx context.Context, queue chan<- event.Batch) error {
 			e.keepalive(event.LSN(lsn))
 		case xld, ok := <-msgs:
 			if !ok {
-				return nil
+				msgs = nil
+				continue
 			}
+			progressed = true
 			b, err := e.decode(xld)
 			if err != nil {
-				return err
+				return progressed, err
 			}
 			if b == nil {
 				continue
@@ -185,7 +206,7 @@ func (e *Engine) read(ctx context.Context, queue chan<- event.Batch) error {
 			select {
 			case queue <- *b:
 			case <-ctx.Done():
-				return nil
+				return progressed, nil
 			}
 		}
 	}
@@ -221,7 +242,7 @@ func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 			}
 			if len(b.Events) == 0 {
 				e.empty(b)
-				e.pending.Add(-1)
+				e.release()
 				continue
 			}
 			if err := e.sendInFlight(ctx, b); err != nil {
@@ -237,7 +258,7 @@ func (e *Engine) deliver(ctx context.Context, queue <-chan event.Batch) error {
 				return fmt.Errorf("sink send: %w", err)
 			}
 			e.confirm(b.EndLSN)
-			e.pending.Add(-1)
+			e.release()
 			e.log.Debug("batch delivered", "commit_lsn", b.CommitLSN.String(),
 				"end_lsn", b.EndLSN.String(), "events", len(b.Events))
 		}

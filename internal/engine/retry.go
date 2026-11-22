@@ -6,6 +6,7 @@ import (
 	"math/rand/v2"
 	"time"
 
+	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
 )
 
@@ -19,13 +20,7 @@ const (
 // behaves like "stop", so an unconfigured engine fails on the first error.
 // Permanent errors are returned unchanged for the permanent-error handling.
 func (e *Engine) withRetry(send func(context.Context, event.Batch) error) func(context.Context, event.Batch) error {
-	rc := e.cfg.Retry
-	if rc.Initial <= 0 {
-		rc.Initial = defaultRetryInitial
-	}
-	if rc.Max <= 0 {
-		rc.Max = defaultRetryMax
-	}
+	rc := e.retryBounds()
 	return func(ctx context.Context, b event.Batch) error {
 		backoff := rc.Initial
 		for attempt := 1; ; attempt++ {
@@ -54,6 +49,18 @@ func (e *Engine) withRetry(send func(context.Context, event.Batch) error) func(c
 			backoff = min(backoff*backoffFactor, rc.Max)
 		}
 	}
+}
+
+// retryBounds returns the retry config with the backoff bounds defaulted.
+func (e *Engine) retryBounds() config.RetryConfig {
+	rc := e.cfg.Retry
+	if rc.Initial <= 0 {
+		rc.Initial = defaultRetryInitial
+	}
+	if rc.Max <= 0 {
+		rc.Max = defaultRetryMax
+	}
+	return rc
 }
 
 // sleepCtx waits d or until ctx is done, returning ctx.Err() in that case.
