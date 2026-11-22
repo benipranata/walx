@@ -18,8 +18,8 @@ import (
 // flags as key: the primary key, or the replica identity index. Under
 // REPLICA IDENTITY FULL Postgres flags every column, so without a configured
 // key the Key is then the whole row, not the primary key; the Relation does
-// not say which columns are the primary key, so the caller (startup identity
-// check, T4.5) must put a FULL table's primary key into keys. Key is read
+// not say which columns are the primary key, so the caller must pass the map
+// ReadKeys builds, which holds each table's primary key. Key is read
 // from After (a column that is Unchanged there comes from Before, else it is
 // an error), or from the old tuple for a delete, where a K tuple only holds
 // the replica identity columns, so a configured key outside them is an error.
