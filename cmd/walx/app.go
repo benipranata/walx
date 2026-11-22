@@ -88,6 +88,6 @@ func (a *app) run(ctx context.Context) (err error) {
 		p.running = true
 		sup.Engines = append(sup.Engines, engine.Named{Name: p.db.Name, Run: p.eng.Run})
 	}
-	a.log.Info("walx started", "databases", len(pipes))
+	a.log.Info("walx started", "version", version, "databases", len(pipes))
 	return sup.Run(ctx)
 }
