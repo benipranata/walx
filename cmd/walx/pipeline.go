@@ -22,16 +22,17 @@ type pipeline struct {
 	db   config.DatabaseConfig
 	log  *slog.Logger // carries "db"
 	sink event.Sink
+	dlq  event.DeadLetter // nil without dlq.path
 	conn *postgres.Conn
 	rels *postgres.Relations
 	buf  *postgres.TxBuffer
 	slot postgres.SlotInfo
 
 	eng     *engine.Engine
-	running bool // engine.Run owns closing the sink
+	running bool // engine.Run owns closing the sink and the dead letter
 }
 
-// preparePipeline builds the sink and runs every startup check of db, without
+// preparePipeline builds the sink and dead-letter file and runs every startup check of db, without
 // starting a stream, so a bad entry fails before any pipeline streams. The
 // caller releases the result with close.
 func preparePipeline(ctx context.Context, db config.DatabaseConfig, reg *sink.Registry, log *slog.Logger) (*pipeline, error) {
@@ -40,6 +41,10 @@ func preparePipeline(ctx context.Context, db config.DatabaseConfig, reg *sink.Re
 		return nil, err
 	}
 	p := &pipeline{db: db, log: log.With("db", db.Name), sink: s, rels: postgres.NewRelations()}
+	if p.dlq, err = openDeadLetter(db); err != nil {
+		p.close(ctx)
+		return nil, fmt.Errorf("database %q: %w", db.Name, err)
+	}
 	if err := p.check(ctx); err != nil {
 		p.close(ctx)
 		return nil, fmt.Errorf("database %q: %w", db.Name, err)
@@ -118,6 +123,7 @@ func (p *pipeline) start(ctx context.Context, log *slog.Logger, m event.Metrics,
 		Metrics:          m,
 		NewSource:        p.newSource,
 		OnPermanentError: p.db.OnPermanentError,
+		DeadLetter:       p.dlq,
 		ShutdownTimeout:  shutdown,
 		SinkTimeout:      p.db.Sink.Timeout,
 	})
@@ -142,13 +148,16 @@ func (p *pipeline) newSource(ctx context.Context, resume pglogrepl.LSN) (engine.
 }
 
 // close releases what the pipeline still owns: the connection, and the sink
-// unless the engine took it over.
+// and dead letter unless the engine took them over.
 func (p *pipeline) close(ctx context.Context) {
 	if p.conn != nil {
 		_ = p.conn.Close(ctx)
 	}
 	if !p.running {
 		_ = p.sink.Close()
+		if p.dlq != nil {
+			_ = p.dlq.Close()
+		}
 	}
 }
 

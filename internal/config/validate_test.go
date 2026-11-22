@@ -28,6 +28,10 @@ func TestValidationErrors(t *testing.T) {
 		{"duplicate names", "databases:\n" + file("a", "./a") + file("a", "./b"), "databases[1].name"},
 		{"duplicate file paths", "databases:\n" + file("a", "./x.jsonl") + file("b", "x.jsonl"), "databases[1].sink.path"},
 		{"relative and absolute file paths", "databases:\n" + file("a", abs) + file("b", "x.jsonl"), "databases[1].sink.path"},
+		{"dlq path equals a file sink path", "databases:\n" + file("a", "./x.jsonl") + "    on_permanent_error: skip\n    dlq: {path: x.jsonl}\n", "databases[0].dlq.path"},
+		{"dlq path shared by two databases", "databases:\n" + file("a", "./a.jsonl") + "    on_permanent_error: skip\n    dlq: {path: d.jsonl}\n" + file("b", "./b.jsonl") + "    on_permanent_error: skip\n    dlq: {path: ./d.jsonl}\n", "databases[1].dlq.path"},
+		{"file sink path equals an earlier dlq path", "databases:\n" + file("a", "./a.jsonl") + "    on_permanent_error: skip\n    dlq: {path: d.jsonl}\n" + file("b", "d.jsonl"), "databases[1].sink.path"},
+		{"dlq with on_permanent_error stop", mk("", "    dlq: {path: d.jsonl}\n"), "databases[0].dlq.path: only applies with on_permanent_error: skip"},
 		{"same url and slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
@@ -185,6 +189,8 @@ func TestValidationAccepts(t *testing.T) {
 		{"stdout sinks may repeat", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres://u@h/a\"}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres://u@h/b\"}, sink: {type: stdout}}\n"},
+		{"dlq with skip", mk("", "    on_permanent_error: skip\n    dlq: {path: d.jsonl}\n")},
+		{"empty dlq path with stop", mk("", "    dlq: {path: \"\"}\n")},
 		{"max_attempts policy with 0", mk("", "    retry: {policy: max_attempts}\n")},
 		{"retry max equals initial", mk("", "    retry: {initial: 1s, max: 1s}\n")},
 		{"column names differ by case", mk("", "    tables:\n      - name: public.t\n        key: [A, a]\n        on_change: [B, b]\n        drop_columns: [C, c]\n")},

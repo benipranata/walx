@@ -11,6 +11,7 @@ type DatabaseConfig struct {
 	Sink             SinkConfig     `yaml:"sink"`
 	Retry            RetryConfig    `yaml:"retry"`
 	OnPermanentError string         `yaml:"on_permanent_error"` // stop | skip
+	DLQ              DLQConfig      `yaml:"dlq"`
 }
 
 // UnmarshalYAML decodes the entry on top of its defaults.

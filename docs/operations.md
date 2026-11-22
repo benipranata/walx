@@ -17,7 +17,34 @@ Connection loss: walx reconnects with the same backoff, resumes from the last co
 A sink returns a permanent error for a batch that can never be written (an event that cannot be encoded, a NATS message over the payload limit, a subject that cannot be built). Retry is not applied.
 
 - `on_permanent_error: stop` (default): the pipeline stops, exit code 1.
-- `skip`: the whole batch is logged at **error level with the full event payloads** (`skipping batch after permanent sink error`, attribute `batch_events`), counted in `events_skipped_total`, confirmed, and the stream continues. Row data therefore ends up in your logs: restrict and retain them accordingly, and use `drop_columns` for sensitive columns. This is the only record of the skipped events.
+- `skip`: the whole batch is counted in `events_skipped_total`, confirmed, and the stream continues. Where the events go depends on `dlq.path`:
+  - With `dlq.path` the events are appended to the [dead-letter file](#replaying-the-dead-letter-file) and fsynced first; only then is the batch confirmed. If that write fails it is retried per `retry` and never skipped: the pipeline stops (exit 1) when the retry policy gives up, and the batch is not confirmed. The error log then holds the LSNs, the event count and the error, but no row data.
+  - Without `dlq.path` the whole batch is logged at **error level with the full event payloads** (`skipping batch after permanent sink error`, attribute `batch_events`). Row data therefore ends up in your logs: restrict and retain them accordingly, and use `drop_columns` for sensitive columns. This is the only record of the skipped events.
+
+`walx snapshot` follows the same rules for its chunks (dead-letter write included).
+
+### Replaying the dead-letter file
+
+`dlq.path` (needs `on_permanent_error: skip`) is a JSON-lines file with one envelope per skipped event, in the order the sink rejected them:
+
+```json
+{"failed_at":"2026-03-04T04:06:07.000000089Z","database":"orders","sink":"nats","error":"message too big","event":{"id":"orders-0/16B3748-1","source":"orders", ...}}
+```
+
+`failed_at` is when the batch was skipped (UTC, one value per batch), `error` the sink's error text, `sink` its `sink.type`. `event` is byte for byte the line the sink would have received, with its original `id`, so a replay is an ordinary at-least-once redelivery: consumers that dedupe by `id` need nothing new, and there is no replay marker or CLI. A consumer that must tell a replay apart reads the envelope, which only the operator holds.
+
+The file is opened in append mode, fsynced before a batch is confirmed and never rotated (rotate it like the [file sink](sinks.md#file): copy-and-truncate, or restart walx). Unlike the file sink, walx ends a torn last line when it opens the file, so the next envelope starts on a fresh line; the file can still contain that torn line after a crash, repeated lines after a retried write, and the same event again after a restart, so readers skip lines that are not valid JSON and dedupe by `event.id`. An event that cannot be JSON-encoded at all (for example a float `NaN` in a column, which also makes a file sink fail) cannot be dead-lettered: that error is permanent for the dead letter too and stops the pipeline.
+
+To replay:
+
+1. Find and fix the cause. Read `error`: `jq -rR 'fromjson? | .error' orders.dlq.jsonl | sort | uniq -c` counts them per error. A message over the NATS payload limit needs a bigger server limit or `drop_columns`; an unbuildable subject needs a config or schema fix.
+2. Extract the events, skipping torn lines, and keep only what you want to resend: `jq -cR 'fromjson? | .event' orders.dlq.jsonl > replay.jsonl` (add a filter such as `select(.error | contains("too big")) | .event` to pick some).
+3. Feed `replay.jsonl` to the destination the sink writes to, as it would have received them:
+   - stdout or file sink: append the lines to the consumer's input, for example `cat replay.jsonl >> /var/lib/walx/orders.jsonl` (stop walx first or accept interleaving; the file sink never reopens the file, so append only to a file nobody else truncates).
+   - nats sink: publish each line with the subject the sink would have used (`{database}`, `{schema}`, `{table}` and the token, see [sinks](sinks.md#subjects)) and the `Nats-Msg-Id` header set to the event `id`, so the stream drops duplicates inside its window, for example with `nats pub --header Nats-Msg-Id:<id> <subject> '<line>'` per line (`source`, `schema`, `table`, `op` and `id` are in each event). Replayed events arrive after newer live events, so consumers must apply them idempotently, as with any redelivery.
+4. Move or truncate the dead-letter file once the replay is done, so the next replay holds only new failures.
+
+Replayed events keep their original order within the file, not relative to the live stream.
 
 ### Large transactions
 
@@ -43,7 +70,7 @@ Structured text logs (`log/slog`) go to stderr at info level; there is no log co
 | --- | --- |
 | info | `startup checks passed` (slot, publication, `slot_created`), `set replica identity full` (per table altered), `walx started`, `reconnected`, `shutting down, waiting for in-flight sink call`, `walx stopped` |
 | warn | `sink send failed, retrying`, `reconnecting`, `dropping events by config filter` (first drop per table and op; the rest only counted in `events_dropped_total`), startup warnings (`max_slot_wal_keep_size is -1 ...`, replica identity and key warnings), `slot lag poll failed` |
-| error | `skipping batch after permanent sink error` (full payloads), `sink send failed` and `shutdown timed out` on stop, `database pipeline failed, stopping the others` |
+| error | `skipping batch after permanent sink error` (full payloads without `dlq.path`; with it the `... written to the dead-letter file` variant without payloads), `sink send failed` and `shutdown timed out` on stop, `database pipeline failed, stopping the others` |
 
 stdout is reserved for the stdout sink's events.
 

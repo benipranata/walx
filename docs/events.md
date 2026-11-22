@@ -71,7 +71,7 @@ With `publication_where` on a table, Postgres evaluates the filter on the row an
 
 `op: snapshot` is the only marker the event contract carries, and it says where a row came from, not that it is a repeat. Replayed events are not marked: they keep their original `id`, so consumers that dedupe by `id` treat a replay like any other redelivery.
 
-Decision: the event has no `replay` field. There is no dead-letter sink yet (with `on_permanent_error: skip` the error log is the only record, see [operations](operations.md#permanent-errors)). When one is added it will wrap each skipped event in an envelope holding the failure metadata (error text, time, database, sink type) around the untouched event JSON, so the event contract stays the same. Replaying will then mean feeding the stored `event` objects back to the destination or the main sink; there is no replay CLI. A replay is at-least-once like everything else, and a consumer that must tell a replay from a live event reads the envelope's metadata.
+Decision: the event has no `replay` field. With `dlq.path` set, every event skipped by `on_permanent_error: skip` is wrapped in an envelope holding the failure metadata (`failed_at`, `database`, `sink`, `error`) around the untouched event JSON in `event`, so the event contract stays the same. Replaying means feeding the stored `event` objects back to the destination; there is no replay CLI (see [operations](operations.md#replaying-the-dead-letter-file)). A replay is at-least-once like everything else, and a consumer that must tell a replay from a live event reads the envelope's metadata.
 
 ## Type mapping
 

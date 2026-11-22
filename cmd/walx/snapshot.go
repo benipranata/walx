@@ -136,6 +136,13 @@ func deliverSnapshot(ctx context.Context, db config.DatabaseConfig, targets []sn
 		return err
 	}
 	defer s.Close()
+	dl, err := openDeadLetter(db)
+	if err != nil {
+		return err
+	}
+	if dl != nil {
+		defer dl.Close()
+	}
 	_, err = snapshot.Run(ctx, snapshot.Config{
 		Name:             db.Name,
 		Postgres:         db.Postgres,
@@ -146,6 +153,7 @@ func deliverSnapshot(ctx context.Context, db config.DatabaseConfig, targets []sn
 		Targets:          targets,
 		Chunk:            chunk,
 		Sink:             s,
+		DeadLetter:       dl,
 		Filter:           filter.New(db.Name, db.Tables, event.NopMetrics{}, log).Apply,
 		Metrics:          event.NopMetrics{},
 		Logger:           log,

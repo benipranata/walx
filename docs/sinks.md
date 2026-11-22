@@ -1,6 +1,6 @@
 # Sinks
 
-One sink per `databases` entry, chosen by `sink.type`. A sink's `Send` returns `nil` only after the destination has the whole batch (one transaction's events) durably, and only then does walx confirm the WAL position. A sink can mark a batch that can never succeed as permanent (see [operations](operations.md#permanent-errors)). All sinks encode events as the JSON in [events](events.md) with HTML escaping off.
+One sink per `databases` entry, chosen by `sink.type`. A sink's `Send` returns `nil` only after the destination has the whole batch (one transaction's events) durably, and only then does walx confirm the WAL position. A sink can mark a batch that can never succeed as permanent (see [operations](operations.md#permanent-errors)). The [dead-letter file](operations.md#replaying-the-dead-letter-file) (`dlq.path`) is not a sink type: it only receives batches skipped after a permanent error, and shares the file sink's append, fsync and torn-line behaviour. All sinks encode events as the JSON in [events](events.md) with HTML escaping off.
 
 ## stdout
 
@@ -20,7 +20,7 @@ Caveats:
 - A write or fsync error is retried, and the failed attempt may already have left lines or a torn last line, so the retry can repeat lines. After a failed partial write walx starts the retry on a fresh line.
 - A crash can leave a torn last line that walx does not repair on restart: the next line is appended right after it. Readers must skip lines that are not valid JSON and dedupe by `id`.
 - walx never rotates and never reopens the file. Rotate with copy-and-truncate, or restart walx after moving the file.
-- Two file sinks must not share a path (config error).
+- Two file sinks (or a file sink and a `dlq.path`) must not share a path (config error).
 
 ```yaml
 sink:

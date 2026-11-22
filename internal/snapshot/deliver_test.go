@@ -92,3 +92,71 @@ func TestDeliverTimeoutAndCancel(t *testing.T) {
 		})
 	}
 }
+
+type fakeDeadLetter struct {
+	errs    []error
+	calls   int
+	batches []event.Batch
+	causes  []error
+}
+
+func (f *fakeDeadLetter) SendFailed(_ context.Context, b event.Batch, cause error) error {
+	f.calls++
+	if len(f.errs) > 0 {
+		err := f.errs[0]
+		f.errs = f.errs[1:]
+		if err != nil {
+			return err
+		}
+	}
+	f.batches = append(f.batches, b)
+	f.causes = append(f.causes, cause)
+	return nil
+}
+
+func (f *fakeDeadLetter) Close() error { return nil }
+
+func TestDeliverDeadLetter(t *testing.T) {
+	boom := errors.New("boom")
+	down := errors.New("disk full")
+	tests := []struct {
+		name       string
+		retry      config.RetryConfig
+		onPerm     string
+		sinkErr    error
+		dlqErrs    []error
+		wantErr    string
+		wantCalls  int
+		wantStored int
+		wantSkip   float64
+	}{
+		{"skip stores the batch", config.RetryConfig{Policy: "stop"}, "skip", event.Permanent(boom), nil, "", 1, 1, 2},
+		{"dead-letter write is retried", config.RetryConfig{Policy: "forever"}, "skip", event.Permanent(boom), []error{down, down}, "", 3, 1, 2},
+		{"failed dead-letter write fails the snapshot", config.RetryConfig{Policy: "stop"}, "skip", event.Permanent(boom), []error{down}, "dead-letter write failed", 1, 0, 0},
+		{"stop mode leaves the dead letter alone", config.RetryConfig{Policy: "stop"}, "stop", event.Permanent(boom), nil, "boom", 0, 0, 0},
+		{"plain error leaves the dead letter alone", config.RetryConfig{Policy: "stop"}, "skip", boom, nil, "boom", 0, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := event.SinkFunc(func(context.Context, event.Batch) error { return tt.sinkErr })
+			dl := &fakeDeadLetter{errs: tt.dlqErrs}
+			m := &countMetrics{counts: map[string]float64{}}
+			d := &deliverer{name: "db", log: slog.New(slog.DiscardHandler), sink: s, deadLetter: dl, retry: tt.retry, onPermanent: tt.onPerm,
+				metrics: m, timeout: time.Minute, sleep: func(context.Context, time.Duration) error { return nil }}
+			b := event.Batch{Events: []*event.Event{{ID: "a"}, {ID: "b"}}}
+			err := d.send(context.Background(), b)
+			if tt.wantErr != "" {
+				require.ErrorContains(t, err, tt.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			require.Equal(t, tt.wantCalls, dl.calls)
+			require.Len(t, dl.batches, tt.wantStored)
+			if tt.wantStored > 0 {
+				require.Equal(t, b, dl.batches[0])
+				require.ErrorIs(t, dl.causes[0], boom)
+			}
+			require.Equal(t, tt.wantSkip, m.counts["events_skipped_total"])
+		})
+	}
+}

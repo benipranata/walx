@@ -39,6 +39,7 @@ type Config struct {
 	Targets          []Target             // empty: every user table
 	Chunk            int                  // rows per batch; 0 = DefaultChunk
 	Sink             event.Sink           // not closed by Run
+	DeadLetter       event.DeadLetter     // optional; receives batches skipped under OnPermanentError skip; not closed by Run
 	Filter           func(event.Batch) event.Batch
 	Metrics          event.Metrics
 	Logger           *slog.Logger
@@ -97,7 +98,7 @@ func Run(ctx context.Context, cfg Config) (Result, error) {
 			targets = append(targets, Target{Table: n})
 		}
 	}
-	d := &deliverer{name: cfg.Name, sink: cfg.Sink, retry: cfg.Retry, onPermanent: cfg.OnPermanentError,
+	d := &deliverer{name: cfg.Name, sink: cfg.Sink, deadLetter: cfg.DeadLetter, retry: cfg.Retry, onPermanent: cfg.OnPermanentError,
 		timeout: cfg.SinkTimeout, metrics: cfg.Metrics, log: log, sleep: sleepCtx}
 	b := &builder{name: cfg.Name, lsn: ex.lsn, ts: time.Now().UTC()}
 	res := Result{ConsistentLSN: ex.lsn}

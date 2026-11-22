@@ -60,7 +60,7 @@ func (c *Config) validate() error {
 	}
 
 	names := map[string]bool{}
-	paths := map[string]bool{}
+	paths := pathSet{}
 	slots := map[[2]string]bool{}
 	pubs := map[[2]string]bool{}
 	for i := range c.Databases {
@@ -99,14 +99,17 @@ func (c *Config) validate() error {
 
 		validateSink(d.Sink, key, bad)
 		if d.Sink.Type == "file" && d.Sink.Path != "" {
-			p, err := filepath.Abs(d.Sink.Path)
-			if err != nil {
-				p = filepath.Clean(d.Sink.Path)
+			if paths.claim(d.Sink.Path) {
+				bad(key("sink.path"), "another file sink or dead-letter file already writes to %q", d.Sink.Path)
 			}
-			if paths[p] {
-				bad(key("sink.path"), "another file sink already writes to %q", d.Sink.Path)
+		}
+		if d.DLQ.Path != "" {
+			if d.OnPermanentError == "stop" {
+				bad(key("dlq.path"), "only applies with on_permanent_error: skip")
 			}
-			paths[p] = true
+			if paths.claim(d.DLQ.Path) {
+				bad(key("dlq.path"), "another file sink or dead-letter file already writes to %q", d.DLQ.Path)
+			}
 		}
 
 		tables := map[string]bool{}
@@ -313,4 +316,18 @@ func validateRetry(r RetryConfig, key func(string) string, bad reporter) {
 	if r.MaxAttempts < 0 {
 		bad(key("retry.max_attempts"), "must not be negative")
 	}
+}
+
+// pathSet remembers the files the config writes to, by absolute path.
+type pathSet map[string]bool
+
+// claim records path and reports whether it was already taken.
+func (s pathSet) claim(path string) (taken bool) {
+	p, err := filepath.Abs(path)
+	if err != nil {
+		p = filepath.Clean(path)
+	}
+	taken = s[p]
+	s[p] = true
+	return taken
 }

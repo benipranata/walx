@@ -22,6 +22,7 @@ const (
 type deliverer struct {
 	name        string
 	sink        event.Sink
+	deadLetter  event.DeadLetter // nil: a skipped batch is only logged and counted
 	retry       config.RetryConfig
 	onPermanent string
 	timeout     time.Duration
@@ -31,18 +32,27 @@ type deliverer struct {
 }
 
 // send returns nil once the batch is durable at the sink or was skipped under
-// on_permanent_error: skip.
+// on_permanent_error: skip, after the dead letter, if any, stored it. A failed
+// dead-letter write is retried like a sink call and then fails the snapshot.
 func (d *deliverer) send(ctx context.Context, b event.Batch) error {
-	err := d.retrying(ctx, b)
+	err := d.retrying(ctx, b, d.attempt)
 	if err == nil || d.onPermanent != "skip" || !event.IsPermanent(err) {
 		return err
+	}
+	if d.deadLetter != nil {
+		cause := err
+		if err := d.retrying(ctx, b, func(ctx context.Context, b event.Batch) error {
+			return d.withTimeout(ctx, func(ctx context.Context) error { return d.deadLetter.SendFailed(ctx, b, cause) })
+		}); err != nil {
+			return fmt.Errorf("dead-letter write failed (batch rejected by the sink: %v): %w", cause, err)
+		}
 	}
 	d.log.Error("skipping batch after permanent sink error", "events", len(b.Events), "err", err)
 	d.metrics.Count("events_skipped_total", float64(len(b.Events)), "database", d.name)
 	return nil
 }
 
-func (d *deliverer) retrying(ctx context.Context, b event.Batch) error {
+func (d *deliverer) retrying(ctx context.Context, b event.Batch, call func(context.Context, event.Batch) error) error {
 	initial, maxBackoff := d.retry.Initial, d.retry.Max
 	if initial <= 0 {
 		initial = defaultRetryInitial
@@ -52,7 +62,7 @@ func (d *deliverer) retrying(ctx context.Context, b event.Batch) error {
 	}
 	backoff := initial
 	for attempt := 1; ; attempt++ {
-		err := d.attempt(ctx, b)
+		err := call(ctx, b)
 		if err == nil || event.IsPermanent(err) {
 			return err
 		}
@@ -78,18 +88,25 @@ func (d *deliverer) retrying(ctx context.Context, b event.Batch) error {
 }
 
 func (d *deliverer) attempt(ctx context.Context, b event.Batch) error {
+	return d.withTimeout(ctx, func(ctx context.Context) error {
+		start := time.Now()
+		err := d.sink.Send(ctx, b)
+		d.metrics.Observe("sink_latency_seconds", time.Since(start).Seconds(), "database", d.name)
+		if err == nil {
+			d.metrics.Count("events_total", float64(len(b.Events)), "database", d.name)
+		}
+		return err
+	})
+}
+
+// withTimeout runs f with the sink timeout, when set, as its deadline.
+func (d *deliverer) withTimeout(ctx context.Context, f func(context.Context) error) error {
 	if d.timeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, d.timeout)
 		defer cancel()
 	}
-	start := time.Now()
-	err := d.sink.Send(ctx, b)
-	d.metrics.Observe("sink_latency_seconds", time.Since(start).Seconds(), "database", d.name)
-	if err == nil {
-		d.metrics.Count("events_total", float64(len(b.Events)), "database", d.name)
-	}
-	return err
+	return f(ctx)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

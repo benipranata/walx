@@ -49,7 +49,9 @@ databases:
       initial: 100ms             # default 100ms
       max: 30s                   # default 30s
       max_attempts: 10           # default 0 (unlimited); total attempts for policy max_attempts
-    on_permanent_error: skip     # default stop; skip logs the whole batch and moves on
+    on_permanent_error: skip     # default stop; skip counts the batch, confirms it and moves on
+    dlq:
+      path: /var/lib/walx/orders.dlq.jsonl   # skipped batches, one envelope per event; without it skip logs the full payloads
 
   - name: billing
     postgres:
@@ -58,4 +60,4 @@ databases:
       - name: public.invoices
     sink:
       type: file
-      path: /var/lib/walx/billing.jsonl   # file only; two file sinks must not share a path
+      path: /var/lib/walx/billing.jsonl   # file only; no two sinks or dead-letter files share a path

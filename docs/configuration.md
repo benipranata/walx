@@ -101,7 +101,7 @@ The one sink of the entry. See [sinks](sinks.md).
 Required: `stdout`, `file` or `nats`.
 
 ### `databases[].sink.path`
-File sink only, required there: the file to append to (created if missing). Two file sinks must not write to the same path.
+File sink only, required there: the file to append to (created if missing). Two file sinks (or a file sink and a `dlq.path`) must not write to the same path.
 
 ### `databases[].sink.url`
 NATS sink only, required there: a server URL or a comma-separated list. Schemes `nats`, `tls`, `ws`, `wss`.
@@ -128,8 +128,14 @@ Duration, default `30s`, must be positive and not below `initial`. Backoff ceili
 Integer, default `0` (unlimited), must not be negative. Used by policy `max_attempts`: the total number of attempts (the first try included) before the pipeline stops with `giving up after N attempts`.
 
 ### `databases[].on_permanent_error`
-`stop` (default) or `skip`. What happens when a sink reports a batch that can never succeed. `skip` logs the whole batch at error level, counts it in `events_skipped_total`, confirms it and continues. Skip logs full event payloads: your row data ends up in the logs. See [operations](operations.md#permanent-errors).
+`stop` (default) or `skip`. What happens when a sink reports a batch that can never succeed. `skip` counts the batch in `events_skipped_total`, confirms it and continues. Without a `dlq.path` the error log is the only record and it holds the full event payloads (your row data ends up in the logs); with one the events go to the dead-letter file and the log carries no payloads. See [operations](operations.md#permanent-errors).
+
+### `databases[].dlq`
+Optional dead-letter file for the entry. See [operations](operations.md#replaying-the-dead-letter-file).
+
+### `databases[].dlq.path`
+Default empty: no dead-letter file. The file receiving the batches skipped by `on_permanent_error: skip` (created if missing, appended to, fsynced before the batch is confirmed). Only valid with `on_permanent_error: skip`. Must not equal any file sink path or any other `dlq.path` of the config.
 
 ## Cross-entry checks
 
-At least one database; names unique; no two entries on the same server share a slot, none on the same database share a publication; no two file sinks share a path.
+At least one database; names unique; no two entries on the same server share a slot, none on the same database share a publication; no two file sinks or dead-letter files share a path.
