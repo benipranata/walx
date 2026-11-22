@@ -127,66 +127,117 @@ func TestRetryCancel(t *testing.T) {
 }
 
 func TestSleepCtx(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	require.NoError(t, sleepCtx(context.Background(), time.Millisecond))
-	cancel()
-	require.ErrorIs(t, sleepCtx(ctx, time.Hour), context.Canceled)
+	tests := []struct {
+		name      string
+		cancelled bool
+		d         time.Duration
+		wantErr   error
+	}{
+		{name: "sleeps then returns nil", d: time.Millisecond},
+		{name: "cancelled context returns early", cancelled: true, d: time.Hour, wantErr: context.Canceled},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if tt.cancelled {
+				cancel()
+			}
+			err := sleepCtx(ctx, tt.d)
+			if tt.wantErr == nil {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, tt.wantErr)
+		})
+	}
 }
 
 func TestBackoffJitter(t *testing.T) {
-	for range 200 {
-		d := jitterBackoff(time.Second)
-		require.GreaterOrEqual(t, d, time.Second/2)
-		require.LessOrEqual(t, d, time.Second)
+	tests := []struct {
+		name string
+		in   time.Duration
+		min  time.Duration
+		max  time.Duration
+	}{
+		{name: "jitter stays within half to full", in: time.Second, min: time.Second / 2, max: time.Second},
+		{name: "zero stays zero", in: 0, min: 0, max: 0},
 	}
-	require.Equal(t, time.Duration(0), jitterBackoff(0))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range 200 {
+				d := jitterBackoff(tt.in)
+				require.GreaterOrEqual(t, d, tt.min)
+				require.LessOrEqual(t, d, tt.max)
+			}
+		})
+	}
 }
 
 func TestRetryLog(t *testing.T) {
-	var out syncBuffer
-	log := slog.New(slog.NewJSONHandler(&out, nil))
-	var calls int
-	sink := event.SinkFunc(func(context.Context, event.Batch) error {
-		calls++
-		if calls == 1 {
-			return errors.New("boom")
-		}
-		return nil
-	})
-	e := New(Config{Name: "orders", Source: newFakeSource(), Sink: sink, Retry: retryCfg("forever", 0), Logger: log})
-	e.sleep = (&fakeClock{}).sleep
-	e.jitter = func(d time.Duration) time.Duration { return d }
-	require.NoError(t, e.send(context.Background(), event.Batch{}))
-	for _, want := range []string{`"level":"WARN"`, `"msg":"sink send failed, retrying"`, `"db":"orders"`,
-		`"attempt":1`, `"backoff":"100ms"`, `"err":"boom"`} {
-		require.Contains(t, out.String(), want)
+	tests := []struct {
+		name string
+		want []string
+	}{
+		{name: "failed send logs a warning", want: []string{`"level":"WARN"`, `"msg":"sink send failed, retrying"`, `"db":"orders"`,
+			`"attempt":1`, `"backoff":"100ms"`, `"err":"boom"`}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out syncBuffer
+			log := slog.New(slog.NewJSONHandler(&out, nil))
+			var calls int
+			sink := event.SinkFunc(func(context.Context, event.Batch) error {
+				calls++
+				if calls == 1 {
+					return errors.New("boom")
+				}
+				return nil
+			})
+			e := New(Config{Name: "orders", Source: newFakeSource(), Sink: sink, Retry: retryCfg("forever", 0), Logger: log})
+			e.sleep = (&fakeClock{}).sleep
+			e.jitter = func(d time.Duration) time.Duration { return d }
+			require.NoError(t, e.send(context.Background(), event.Batch{}))
+			for _, want := range tt.want {
+				require.Contains(t, out.String(), want)
+			}
+		})
 	}
 }
 
 // TestRetryHoldsLSN checks that the LSN is not confirmed while the sink fails.
 func TestRetryHoldsLSN(t *testing.T) {
-	const failures = 3
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	src := newFakeSource()
-	var calls atomic.Int32
-	var confirmedDuring atomic.Int32
-	sink := event.SinkFunc(func(context.Context, event.Batch) error {
-		if int(calls.Add(1)) <= failures {
-			confirmedDuring.Add(int32(len(src.Confirmed())))
-			return errors.New("boom")
-		}
-		return nil
-	})
-	e := New(Config{Name: "a", Source: src, Sink: sink, Retry: retryCfg("forever", 0)})
-	stubDecode(e)
-	e.sleep = (&fakeClock{}).sleep
-	done := runEngine(ctx, e)
-	feed(ctx, src, 1)
-	require.Eventually(t, func() bool { return len(src.Confirmed()) == 1 }, 5*time.Second, 5*time.Millisecond)
-	require.Equal(t, int32(failures+1), calls.Load())
-	require.Zero(t, confirmedDuring.Load())
-	require.Equal(t, []pglogrepl.LSN{10}, src.Confirmed())
-	cancel()
-	require.ErrorIs(t, wait(t, done), context.Canceled)
+	tests := []struct {
+		name     string
+		failures int
+	}{
+		{name: "lsn held while the sink fails", failures: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			src := newFakeSource()
+			var calls atomic.Int32
+			var confirmedDuring atomic.Int32
+			sink := event.SinkFunc(func(context.Context, event.Batch) error {
+				if int(calls.Add(1)) <= tt.failures {
+					confirmedDuring.Add(int32(len(src.Confirmed())))
+					return errors.New("boom")
+				}
+				return nil
+			})
+			e := New(Config{Name: "a", Source: src, Sink: sink, Retry: retryCfg("forever", 0)})
+			stubDecode(e)
+			e.sleep = (&fakeClock{}).sleep
+			done := runEngine(ctx, e)
+			feed(ctx, src, 1)
+			require.Eventually(t, func() bool { return len(src.Confirmed()) == 1 }, 5*time.Second, 5*time.Millisecond)
+			require.Equal(t, int32(tt.failures+1), calls.Load())
+			require.Zero(t, confirmedDuring.Load())
+			require.Equal(t, []pglogrepl.LSN{10}, src.Confirmed())
+			cancel()
+			require.ErrorIs(t, wait(t, done), context.Canceled)
+		})
+	}
 }

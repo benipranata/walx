@@ -73,17 +73,27 @@ func TestSupervisorRun(t *testing.T) {
 }
 
 func TestSupervisorNoEngines(t *testing.T) {
-	require.Error(t, (&Supervisor{}).Run(context.Background()))
+	tests := []struct{ name string }{{name: "no engines is an error"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Error(t, (&Supervisor{}).Run(context.Background()))
+		})
+	}
 }
 
 func TestSupervisorLogsFailure(t *testing.T) {
-	var out syncBuffer
-	s := Supervisor{Logger: slog.New(slog.NewTextHandler(&out, nil)), Engines: []Named{
-		{Name: "orders", Run: func(context.Context) error { return errors.New("boom") }},
-		{Name: "users", Run: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }},
-	}}
-	require.Error(t, s.Run(context.Background()))
-	require.True(t, strings.Contains(out.String(), "db=orders") && strings.Contains(out.String(), "err=boom"), out.String())
+	tests := []struct{ name string }{{name: "failing engine is logged with its name"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var out syncBuffer
+			s := Supervisor{Logger: slog.New(slog.NewTextHandler(&out, nil)), Engines: []Named{
+				{Name: "orders", Run: func(context.Context) error { return errors.New("boom") }},
+				{Name: "users", Run: func(ctx context.Context) error { <-ctx.Done(); return ctx.Err() }},
+			}}
+			require.Error(t, s.Run(context.Background()))
+			require.True(t, strings.Contains(out.String(), "db=orders") && strings.Contains(out.String(), "err=boom"), out.String())
+		})
+	}
 }
 
 // TestSupervisorEngines runs two real engines over fake sources.

@@ -37,36 +37,41 @@ func newDBEngine(t *testing.T, ctx context.Context, name, slot string, sink *mem
 }
 
 func TestSupervisorIntegration(t *testing.T) {
-	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	sinkA, sinkB := &memSink{}, &memSink{}
-	a, adminA := newDBEngine(t, ctx, "dba", "sup_a", sinkA)
-	b, adminB := newDBEngine(t, ctx, "dbb", "sup_b", sinkB)
+	tests := []struct{ name string }{{name: "two databases stream independently"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			sinkA, sinkB := &memSink{}, &memSink{}
+			a, adminA := newDBEngine(t, ctx, "dba", "sup_a", sinkA)
+			b, adminB := newDBEngine(t, ctx, "dbb", "sup_b", sinkB)
 
-	s := Supervisor{Engines: []Named{{"dba", a.Run}, {"dbb", b.Run}}}
-	runCtx, stop := context.WithCancel(ctx)
-	done := make(chan error, 1)
-	go func() { done <- s.Run(runCtx) }()
+			s := Supervisor{Engines: []Named{{"dba", a.Run}, {"dbb", b.Run}}}
+			runCtx, stop := context.WithCancel(ctx)
+			done := make(chan error, 1)
+			go func() { done <- s.Run(runCtx) }()
 
-	for i := 1; i <= 5; i++ {
-		_, err := adminA.Exec(ctx, `INSERT INTO t VALUES ($1)`, i)
-		require.NoError(t, err)
-		_, err = adminB.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+100)
-		require.NoError(t, err)
-	}
-	require.Eventually(t, func() bool { return len(sinkA.Batches()) == 5 && len(sinkB.Batches()) == 5 }, 10*time.Second, 20*time.Millisecond)
-	for i := 0; i < 5; i++ {
-		require.Equal(t, "dba", sinkA.Batches()[i].Events[0].Source)
-		require.EqualValues(t, i+1, sinkA.Batches()[i].Events[0].After["id"])
-		require.Equal(t, "dbb", sinkB.Batches()[i].Events[0].Source)
-		require.EqualValues(t, i+101, sinkB.Batches()[i].Events[0].After["id"])
-	}
-	stop()
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(10 * time.Second):
-		t.Fatal("supervisor did not stop")
+			for i := 1; i <= 5; i++ {
+				_, err := adminA.Exec(ctx, `INSERT INTO t VALUES ($1)`, i)
+				require.NoError(t, err)
+				_, err = adminB.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+100)
+				require.NoError(t, err)
+			}
+			require.Eventually(t, func() bool { return len(sinkA.Batches()) == 5 && len(sinkB.Batches()) == 5 }, 10*time.Second, 20*time.Millisecond)
+			for i := 0; i < 5; i++ {
+				require.Equal(t, "dba", sinkA.Batches()[i].Events[0].Source)
+				require.EqualValues(t, i+1, sinkA.Batches()[i].Events[0].After["id"])
+				require.Equal(t, "dbb", sinkB.Batches()[i].Events[0].Source)
+				require.EqualValues(t, i+101, sinkB.Batches()[i].Events[0].After["id"])
+			}
+			stop()
+			select {
+			case err := <-done:
+				require.ErrorIs(t, err, context.Canceled)
+			case <-time.After(10 * time.Second):
+				t.Fatal("supervisor did not stop")
+			}
+		})
 	}
 }

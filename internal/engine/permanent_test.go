@@ -94,17 +94,22 @@ func TestPermanentErrors(t *testing.T) {
 }
 
 func TestPermanentSkipConfirms(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	src := newFakeSource()
-	sink := event.SinkFunc(func(context.Context, event.Batch) error { return event.Permanent(errors.New("bad")) })
-	m := &countMetrics{}
-	e := New(Config{Name: "a", Source: src, Sink: sink, Metrics: m, OnPermanentError: "skip"})
-	stubDecode(e)
-	done := runEngine(ctx, e)
-	feed(ctx, src, 3)
-	require.Eventually(t, func() bool { return len(src.Confirmed()) == 3 }, 5*time.Second, 5*time.Millisecond)
-	cancel()
-	require.ErrorIs(t, wait(t, done), context.Canceled)
-	require.Equal(t, float64(3), m.get("events_skipped_total"))
+	tests := []struct{ name string }{{name: "skip confirms every skipped batch"}}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			src := newFakeSource()
+			sink := event.SinkFunc(func(context.Context, event.Batch) error { return event.Permanent(errors.New("bad")) })
+			m := &countMetrics{}
+			e := New(Config{Name: "a", Source: src, Sink: sink, Metrics: m, OnPermanentError: "skip"})
+			stubDecode(e)
+			done := runEngine(ctx, e)
+			feed(ctx, src, 3)
+			require.Eventually(t, func() bool { return len(src.Confirmed()) == 3 }, 5*time.Second, 5*time.Millisecond)
+			cancel()
+			require.ErrorIs(t, wait(t, done), context.Canceled)
+			require.Equal(t, float64(3), m.get("events_skipped_total"))
+		})
+	}
 }
