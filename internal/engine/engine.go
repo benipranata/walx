@@ -109,7 +109,7 @@ func New(cfg Config) *Engine {
 	if cfg.Metrics == nil {
 		e.cfg.Metrics = event.NopMetrics{}
 	}
-	e.send = e.withPermanent(e.withRetry(e.withSinkTimeout(cfg.Sink.Send)))
+	e.send = e.withPermanent(e.withRetry(e.withSinkTimeout(e.withMetrics(cfg.Sink.Send))))
 	e.confirm = e.confirmToSource
 	e.empty = e.confirmEmpty
 	return e

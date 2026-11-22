@@ -20,6 +20,7 @@ type countMetrics struct {
 	mu     sync.Mutex
 	counts map[string]float64
 	labels map[string][]string
+	obs    map[string][]float64
 }
 
 func (m *countMetrics) Count(name string, delta float64, labels ...string) {
@@ -33,6 +34,21 @@ func (m *countMetrics) Count(name string, delta float64, labels ...string) {
 }
 
 func (m *countMetrics) Gauge(string, float64, ...string) {}
+
+func (m *countMetrics) Observe(name string, v float64, _ ...string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.obs == nil {
+		m.obs = map[string][]float64{}
+	}
+	m.obs[name] = append(m.obs[name], v)
+}
+
+func (m *countMetrics) observed(name string) []float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]float64(nil), m.obs[name]...)
+}
 
 func (m *countMetrics) get(name string) float64 {
 	m.mu.Lock()
