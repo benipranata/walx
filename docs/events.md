@@ -57,7 +57,7 @@ The stream describes changes, not table state. Do not treat it as a replica:
 
 ## Before, After and replica identity
 
-Under the default replica identity `before` is absent for updates, and a delete has no `before` either, only `key`. `before` is filled only under `REPLICA IDENTITY FULL`, which walx sets for tables that need it ([setup](setup.md)). If `FULL` is on, `Key` is still the configured key (or the primary key), not the whole row.
+Under the default replica identity `before` is absent for updates, and a delete has no `before` either, only `key`. `before` is filled only under `REPLICA IDENTITY FULL`, which walx sets for tables that need it ([setup](setup.md)). If `FULL` is on, `Key` is still the configured key (or the primary key), not the whole row, with two exceptions where `Key` is the whole row: a listed table with neither a primary key nor a configured `key`, and any table in a `FOR ALL TABLES` config (no `tables` list, so walx reads no keys). Configure `key` for a listed table, or list the table, to get a narrow key.
 
 ## Unchanged TOAST values
 
@@ -92,5 +92,7 @@ The decoder reads the text output of the walsender, and the connection pins `dat
 | `NULL` | `null` |
 | unchanged TOAST (any type) | `{"$unchanged": true}` |
 | everything else (arrays, enums, `interval`, `time`, `timetz`, `inet`, `money`, geometric, ranges, composite, user types) | string in Postgres text output, e.g. arrays as `"{1,2,3}"`, `interval` as ISO 8601 (`"P1DT2H"`) |
+
+A column of a domain type is a string on the live stream, because pgoutput reports the domain's OID and the decoder does not know the base type (a domain over `int4` arrives as `"5"`). `walx snapshot` reports the base type, so the same column arrives as `5` there.
 
 Values that Go time or float types cannot hold (`infinity`, BC dates) also stay strings. Events carry no column types, so a consumer cannot tell a `text` column holding `"5"` from a `numeric` 5 other than by schema knowledge; the same applies to `where`, which compares a string with a configured number by exact decimal value.
