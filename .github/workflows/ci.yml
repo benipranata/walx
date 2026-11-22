@@ -26,6 +26,11 @@ jobs:
           cache: true
       - name: Check go.mod and go.sum are tidy
         run: go mod tidy -diff
+      - name: Check generated mocks are current
+        run: |
+          go tool mockery
+          git diff --exit-code -- . ':!go.mod' ':!go.sum'
+          test -z "$(git ls-files --others --exclude-standard)"
       - name: Check formatting
         run: test -z "$(gofmt -l .)"
       - name: Test scripts
@@ -36,8 +41,9 @@ jobs:
         run: go test -race -covermode=atomic -coverprofile=coverage.out -timeout 300s ./...
       - name: Coverage
         run: |
-          go tool cover -func=coverage.out
-          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          grep -v '/mock/' coverage.out > coverage.nomocks.out
+          go tool cover -func=coverage.nomocks.out
+          total=$(go tool cover -func=coverage.nomocks.out | awk '/^total:/ {print $3}')
           echo "### Coverage" >> "$GITHUB_STEP_SUMMARY"
           echo "Total: **$total**" >> "$GITHUB_STEP_SUMMARY"
       - name: Coverage of changed files

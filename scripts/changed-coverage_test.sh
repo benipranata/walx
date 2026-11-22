@@ -15,6 +15,8 @@ git checkout -qb feat
 printf 'package pkg\n\nfunc F() {}\n' > pkg/a.go
 printf 'package pkg\n' > pkg/empty.go
 printf 'package pkg\n' > pkg/b_test.go
+mkdir pkg/mock
+printf 'package mock\n' > pkg/mock/mock_x.go
 printf 'package pkg\n' > "pkg/sp ace.go"
 git add . && git commit -qm change
 cat > cov.out <<'COV'
@@ -29,6 +31,7 @@ echo "$out" | grep -qF '| `pkg/a.go` | 50.0% (2/4) |'
 echo "$out" | grep -qF '| `pkg/empty.go` | no statements |'
 echo "$out" | grep -qF '| `pkg/sp ace.go` | not in profile |'
 ! echo "$out" | grep -q b_test
+! echo "$out" | grep -q /mock/
 git checkout -q main
 [ "$(sh "$script" cov.out main)" = "No non-test Go files changed." ]
 echo ok

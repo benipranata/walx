@@ -1,7 +1,7 @@
 #!/bin/sh
 # Usage: changed-coverage.sh <coverage.out> <base-ref>
 # Prints a markdown table of statement coverage for the Go files changed
-# between <base-ref> and HEAD (non-test files only; tests have no statements).
+# between <base-ref> and HEAD (non-test files only; tests have no statements; generated mocks excluded).
 set -eu
 if [ $# -ne 2 ]; then
   echo "usage: $0 <coverage.out> <base-ref>" >&2
@@ -11,7 +11,7 @@ profile=$1
 base=$2
 module=$(go list -m)
 
-files=$(git diff --name-only --diff-filter=d "$base...HEAD" -- '*.go' | grep -v '_test\.go$' || true)
+files=$(git diff --name-only --diff-filter=d "$base...HEAD" -- '*.go' | grep -v -e '_test\.go$' -e '/mock/' || true)
 if [ -z "$files" ]; then
   echo "No non-test Go files changed."
   exit 0
