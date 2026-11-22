@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -188,6 +189,27 @@ func validateTable(t TableConfig, key func(string) string, bad reporter) {
 		} else if slices.Contains(t.Ops[:i], op) {
 			bad(key(fmt.Sprintf("ops[%d]", i)), "duplicate op %q", op)
 		}
+	}
+	for _, f := range []struct {
+		name string
+		cols []string
+	}{{"key", t.Key}, {"on_change", t.OnChange}, {"drop_columns", t.DropColumns}} {
+		for i, c := range f.cols {
+			if strings.TrimSpace(c) == "" {
+				bad(key(fmt.Sprintf("%s[%d]", f.name, i)), "must not be blank")
+			} else if slices.Contains(f.cols[:i], c) {
+				bad(key(fmt.Sprintf("%s[%d]", f.name, i)), "duplicate column %q", c)
+			}
+		}
+	}
+	for _, col := range slices.Sorted(maps.Keys(t.Where)) {
+		switch v := t.Where[col]; v.(type) {
+		case map[string]any, map[any]any, []any:
+			bad(key("where."+col), "value must be a scalar, got %T", v)
+		}
+	}
+	if _, ok := t.Where[""]; ok {
+		bad(key("where"), "column name must not be empty")
 	}
 	if i := slices.Index(t.DropColumns, t.FSMColumn); t.FSMColumn != "" && i >= 0 {
 		bad(key(fmt.Sprintf("drop_columns[%d]", i)), "must not drop the fsm_column %q", t.FSMColumn)

@@ -69,6 +69,15 @@ func TestValidationErrors(t *testing.T) {
 		{"snapshot is not a table op", mk("", "    tables:\n      - name: public.t\n        ops: [insert, snapshot]\n"), "databases[0].tables[0].ops[1]"},
 		{"name over 58 characters", "databases:\n  - {name: " + strings.Repeat("a", 59) + ", postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n", "databases[0].name"},
 		{"fsm_column also in drop_columns", mk("", "    tables:\n      - name: public.t\n        fsm_column: status\n        drop_columns: [x, status]\n"), "databases[0].tables[0].drop_columns[1]"},
+		{"blank key entry", mk("", "    tables:\n      - name: public.t\n        key: [id, \"  \"]\n"), "databases[0].tables[0].key[1]"},
+		{"duplicate key entry", mk("", "    tables:\n      - name: public.t\n        key: [id, id]\n"), "databases[0].tables[0].key[1]"},
+		{"blank on_change entry", mk("", "    tables:\n      - name: public.t\n        on_change: [\"\"]\n"), "databases[0].tables[0].on_change[0]"},
+		{"duplicate on_change entry", mk("", "    tables:\n      - name: public.t\n        on_change: [a, b, a]\n"), "databases[0].tables[0].on_change[2]"},
+		{"blank drop_columns entry", mk("", "    tables:\n      - name: public.t\n        drop_columns: [a, \"\"]\n"), "databases[0].tables[0].drop_columns[1]"},
+		{"duplicate drop_columns entry", mk("", "    tables:\n      - name: public.t\n        drop_columns: [a, a]\n"), "databases[0].tables[0].drop_columns[1]"},
+		{"empty where column", mk("", "    tables:\n      - name: public.t\n        where: {\"\": 1}\n"), "databases[0].tables[0].where"},
+		{"map where value", mk("", "    tables:\n      - name: public.t\n        where: {status: {a: 1}}\n"), "databases[0].tables[0].where.status"},
+		{"list where value", mk("", "    tables:\n      - name: public.t\n        where: {status: [a, b]}\n"), "databases[0].tables[0].where.status"},
 		{"duplicate op in a table", mk("", "    tables:\n      - name: public.t\n        ops: [insert, update, insert]\n"), "databases[0].tables[0].ops[2]"},
 		{"unix socket same slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n" +
@@ -165,11 +174,26 @@ func TestValidationAccepts(t *testing.T) {
 			"  - {name: b, postgres: {url: \"postgres://u@h/b\"}, sink: {type: stdout}}\n"},
 		{"max_attempts policy with 0", mk("", "    retry: {policy: max_attempts}\n")},
 		{"retry max equals initial", mk("", "    retry: {initial: 1s, max: 1s}\n")},
+		{"column names differ by case", mk("", "    tables:\n      - name: public.t\n        key: [A, a]\n        on_change: [B, b]\n        drop_columns: [C, c]\n")},
 		{"all ops", mk("", "    tables:\n      - {name: public.t, ops: [insert, update, delete, truncate]}\n")},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := config.Parse([]byte(tt.doc))
+			require.NoError(t, err)
+		})
+	}
+}
+
+func TestWhereAllowsNullAndScalars(t *testing.T) {
+	tests := []struct{ name, where string }{
+		{"null value", "{deleted_at: null}"},
+		{"scalars", "{status: open, n: 3, f: 1.5, ok: true}"},
+		{"quoted flow-looking string", "{status: \"[a, b]\"}"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := config.Parse([]byte(mk("", "    tables:\n      - name: public.t\n        where: "+tt.where+"\n")))
 			require.NoError(t, err)
 		})
 	}
