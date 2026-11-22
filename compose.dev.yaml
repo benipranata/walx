@@ -20,3 +20,14 @@ services:
       interval: 2s
       timeout: 3s
       retries: 15
+
+  nats:
+    image: nats:latest
+    command: ["-js"]
+    ports:
+      - "127.0.0.1:4222:4222"
+    healthcheck:
+      test: ["CMD", "nats-server", "--version"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
