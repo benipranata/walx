@@ -3,9 +3,7 @@
 package stdout
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -14,6 +12,7 @@ import (
 
 	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
+	"github.com/benipranata/walx/internal/sink/jsonl"
 )
 
 // Sink writes events as JSON lines to a writer it does not own.
@@ -40,21 +39,17 @@ func (s *Sink) Send(ctx context.Context, b event.Batch) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	for _, e := range b.Events {
-		if err := enc.Encode(e); err != nil {
-			return event.Permanent(fmt.Errorf("stdout sink: encode event %s: %w", e.ID, err))
-		}
+	buf, err := jsonl.Encode(b.Events)
+	if err != nil {
+		return event.Permanent(fmt.Errorf("stdout sink: %w", err))
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed {
 		return errors.New("stdout sink closed")
 	}
-	n, err := s.w.Write(buf.Bytes())
-	if err == nil && n < buf.Len() {
+	n, err := s.w.Write(buf)
+	if err == nil && n < len(buf) {
 		err = io.ErrShortWrite
 	}
 	if err != nil {
