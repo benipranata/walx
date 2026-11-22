@@ -77,12 +77,15 @@ func checkKeys(n *yaml.Node, t reflect.Type, path string, lines lineKeys) (errs 
 	return errs
 }
 
-// yamlFields maps yaml names to field types; every config field carries a tag.
+// yamlFields maps yaml names to field types; every config field carries a tag; `yaml:"-"` fields are not keys.
 func yamlFields(t reflect.Type) map[string]reflect.Type {
 	fields := make(map[string]reflect.Type, t.NumField())
 	for i := range t.NumField() {
 		f := t.Field(i)
 		name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		if name == "-" {
+			continue
+		}
 		fields[name] = f.Type
 	}
 	return fields

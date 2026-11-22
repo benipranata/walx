@@ -11,10 +11,12 @@ import (
 	"strings"
 
 	"github.com/benipranata/walx/internal/event"
+	"github.com/benipranata/walx/internal/sink/subject"
 )
 
 var (
-	sinkTypes       = []string{"stdout", "file"}
+	natsSchemes     = []string{"nats", "tls", "ws", "wss"}
+	sinkTypes       = []string{"stdout", "file", "nats"}
 	retryPolicies   = []string{"forever", "max_attempts", "stop"}
 	permanentErrors = []string{"stop", "skip"}
 	ops             = []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate}
@@ -172,6 +174,35 @@ func validateSink(s SinkConfig, key func(string) string, bad reporter) {
 	}
 	if s.Type == "file" && s.Path == "" {
 		bad(key("sink.path"), "required for a file sink")
+	}
+	if s.Type != "nats" {
+		return
+	}
+	if s.URL == "" {
+		bad(key("sink.url"), "required for a nats sink")
+	} else {
+		for _, raw := range strings.Split(s.URL, ",") {
+			validateNatsURL(strings.TrimSpace(raw), key, bad)
+		}
+	}
+	if s.Subject != "" {
+		if _, err := subject.Parse(s.Subject); err != nil {
+			bad(key("sink.subject"), "%v", err)
+		}
+	}
+}
+
+func validateNatsURL(raw string, key func(string) string, bad reporter) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		// url.Error embeds the whole URL, password included.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		bad(key("sink.url"), "not a valid URL: %v", err)
+	} else if !slices.Contains(natsSchemes, u.Scheme) || u.Host == "" {
+		bad(key("sink.url"), "must look like nats://host:port (schemes: %s)", strings.Join(natsSchemes, ", "))
 	}
 }
 

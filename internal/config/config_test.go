@@ -114,7 +114,8 @@ databases:
 					Key:           []string{"id"},
 					ReferenceOnly: true,
 				}}, d.Tables)
-				require.Equal(t, config.SinkConfig{Type: "file", Path: "./a.jsonl", Timeout: 45 * time.Second}, d.Sink)
+				require.Equal(t, config.SinkConfig{Type: "file", Path: "./a.jsonl", Timeout: 45 * time.Second,
+					FSMColumns: map[string]string{"public.orders": "status"}}, d.Sink)
 				require.Equal(t, config.RetryConfig{
 					Policy: "max_attempts", Initial: time.Second, Max: time.Minute, MaxAttempts: 5,
 				}, d.Retry)

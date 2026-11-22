@@ -32,6 +32,12 @@ func (d *DatabaseConfig) UnmarshalYAML(n *yaml.Node) error {
 		if d.Tables[i].Ops == nil {
 			d.Tables[i].Ops = defaultOps()
 		}
+		if col := d.Tables[i].FSMColumn; col != "" {
+			if d.Sink.FSMColumns == nil {
+				d.Sink.FSMColumns = map[string]string{}
+			}
+			d.Sink.FSMColumns[d.Tables[i].Name] = col
+		}
 	}
 	return nil
 }
