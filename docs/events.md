@@ -67,6 +67,12 @@ Large values (TOAST) that an update does not rewrite are not in the WAL. Such a 
 
 With `publication_where` on a table, Postgres evaluates the filter on the row and rewrites the op: an update that moves a row out of the filter arrives as a `delete` (its `before` is the old row), one that moves a row into the filter arrives as an `insert`, and an update inside it stays an `update`. Rows that never match produce nothing. The table must therefore list `delete` (and `insert`) in `ops` to see these events; otherwise the walx filter drops them. A rewritten `delete` does not mean the row was deleted at the source. `seq` in `Event.ID` counts what Postgres sends, so changing the filter changes the IDs of a transaction that is redelivered afterwards. Use the filter as an optimization and keep `where` for the semantics you rely on.
 
+## Replay and the snapshot marker
+
+`op: snapshot` is the only marker the event contract carries, and it says where a row came from, not that it is a repeat. Replayed events are not marked: they keep their original `id`, so consumers that dedupe by `id` treat a replay like any other redelivery.
+
+Decision: the event has no `replay` field. There is no dead-letter sink yet (with `on_permanent_error: skip` the error log is the only record, see [operations](operations.md#permanent-errors)). When one is added it will wrap each skipped event in an envelope holding the failure metadata (error text, time, database, sink type) around the untouched event JSON, so the event contract stays the same. Replaying will then mean feeding the stored `event` objects back to the destination or the main sink; there is no replay CLI. A replay is at-least-once like everything else, and a consumer that must tell a replay from a live event reads the envelope's metadata.
+
 ## Type mapping
 
 The decoder reads the text output of the walsender, and the connection pins `datestyle=ISO`, `bytea_output=hex`, `extra_float_digits=1` and `intervalstyle=iso_8601` so the output does not depend on database defaults.
