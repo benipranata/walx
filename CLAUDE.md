@@ -4,8 +4,6 @@
 
 walx is a standalone Go executable (`cmd/walx`) that turns the Postgres WAL (pgoutput, Postgres 18+ only) into an ordered, at-least-once event stream written to a sink. One `config.yaml` lists several databases; each gets an independent pipeline (connection, slot, sink, retry, LSN checkpoint). No public Go API, no user Go code.
 
-Status: M1 to M4 and the sink registry, contract suite, stdout, file and NATS sinks are implemented: config, `internal/event`, `internal/postgres` (connection, slot, publication, lag poller, stream, standby, relation cache, pgoutput decoding, transaction buffering, schema change, `EnsureReplicaIdentity`, `ReadKeys`, `CheckKeys`, `CheckWALRetention`), `internal/engine` (run loop, retry, permanent errors, idle advance, shutdown, reconnect via `Config.NewSource`, supervisor), all `internal/filter` rules and publication row filters and column lists (`publication_where`, `publication_columns`). The postgres integration tests run against a real Postgres 18 (see Commands). Metrics are implemented (`internal/metrics` Prometheus adapter, engine emission, `postgres.LagPoller`). `cmd/walx` serves (`-config`, default `./config.yaml`), wiring sinks, engine, startup checks, metrics listener and lag poller; `walx snapshot` is implemented (`internal/snapshot`), and the dead-letter file (`internal/sink/dlq`, `dlq.path`). M6 docs are done (README.md, `docs/*.md`, `config.example.yaml`); CI is done (`.github/workflows/ci.yml` job `unit`, `.github/workflows/integration.yml` job `integration`).
-
 ## Docs
 
 - Docs live in `README.md` and `docs/` (setup, configuration, events, sinks, operations). Update them with any change to config keys, defaults, type mapping, sinks, metrics or exit codes.
