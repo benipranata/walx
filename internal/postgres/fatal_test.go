@@ -24,6 +24,7 @@ func TestIsFatal(t *testing.T) {
 		{"slot missing", fmt.Errorf("x: %w", ErrSlotMissing), true},
 		{"slot lost", fmt.Errorf("x: %w", ErrSlotLost), true},
 		{"publication missing", fmt.Errorf("x: %w", ErrPublicationMissing), true},
+		{"replica identity", fmt.Errorf("x: %w", ErrReplicaIdentity), true},
 		{"tx too large", fmt.Errorf("x: %w", &TxTooLargeError{}), true},
 	}
 	for _, tt := range tests {

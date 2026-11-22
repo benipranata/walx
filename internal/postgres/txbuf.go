@@ -19,6 +19,9 @@ type TxBuffer struct {
 	keys map[string][]string
 	tx   *txState
 	lim  TxLimits
+
+	identity *IdentityPolicy
+	warn     func(string)
 }
 
 type txState struct {
@@ -72,6 +75,15 @@ func (b *TxBuffer) push(msg pglogrepl.Message, walStart event.LSN) (*event.Batch
 	switch m := msg.(type) {
 	case *pglogrepl.RelationMessage:
 		b.rels.Set(m)
+		if b.identity != nil {
+			warn, err := b.identity.CheckRelation(m)
+			if err != nil {
+				return nil, err
+			}
+			if warn != "" && b.warn != nil {
+				b.warn(warn)
+			}
+		}
 	case *pglogrepl.BeginMessage:
 		if b.tx != nil {
 			return nil, errors.New("begin inside a transaction")

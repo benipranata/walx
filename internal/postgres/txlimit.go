@@ -22,6 +22,14 @@ func WithTxLimits(l TxLimits) TxOption {
 	return func(b *TxBuffer) { b.lim = l }
 }
 
+// WithIdentityCheck makes a TxBuffer check the replica identity announced by
+// every Relation message: an unusable listed table fails Push with an error
+// wrapping ErrReplicaIdentity, and a problem on another table goes to warn
+// (which may be nil).
+func WithIdentityCheck(p *IdentityPolicy, warn func(string)) TxOption {
+	return func(b *TxBuffer) { b.identity, b.warn = p, warn }
+}
+
 // tupleBytes returns the raw column bytes carried by a DML message.
 func tupleBytes(msg pglogrepl.Message) int64 {
 	switch m := msg.(type) {
