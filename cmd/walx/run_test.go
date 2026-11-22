@@ -20,7 +20,7 @@ func TestRun(t *testing.T) {
 		{"snapshot with unknown flag", []string{"snapshot", "-nope"}, 2, "flag provided but not defined: -nope", ""},
 		{"snapshot with stray argument", []string{"snapshot", "orders"}, 2, "unexpected argument", ""},
 		{"unknown command", []string{"bogus"}, 2, `unknown command "bogus"`, ""},
-		{"no command", nil, 2, "usage: walx", ""},
+		{"no command serves with the default config", nil, 1, "config.yaml", ""},
 		{"help", []string{"help"}, 0, "", "usage: walx"},
 		{"-h", []string{"-h"}, 0, "", "usage: walx"},
 		{"--help", []string{"--help"}, 0, "", "usage: walx"},
