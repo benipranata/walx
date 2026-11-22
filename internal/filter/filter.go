@@ -3,6 +3,7 @@ package filter
 
 import (
 	"log/slog"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -12,8 +13,8 @@ import (
 	"github.com/benipranata/walx/internal/event"
 )
 
-// Chain drops events by table, op, on_change and where. It never mutates its
-// input.
+// Chain drops events by table, op, on_change and where, and removes
+// drop_columns from the row images. It never mutates its input.
 type Chain struct {
 	name    string
 	tables  map[string]tableRule
@@ -29,6 +30,7 @@ type tableRule struct {
 	ops      []event.Op
 	where    map[string]any
 	onChange []string
+	drop     []string
 }
 
 var defaultOps = []event.Op{event.OpInsert, event.OpUpdate}
@@ -57,7 +59,7 @@ func New(name string, tables []config.TableConfig, m event.Metrics, log *slog.Lo
 		if ops == nil {
 			ops = defaultOps
 		}
-		c.tables[t.Name] = tableRule{ops: ops, where: t.Where, onChange: t.OnChange}
+		c.tables[t.Name] = tableRule{ops: ops, where: t.Where, onChange: t.OnChange, drop: t.DropColumns}
 	}
 	return c
 }
@@ -70,13 +72,41 @@ func (c *Chain) Apply(b event.Batch) event.Batch {
 	for _, e := range b.Events {
 		ok, reason := c.keep(e)
 		if ok {
-			kept = append(kept, e)
+			kept = append(kept, c.dropColumns(e))
 			continue
 		}
 		c.drop(e, reason)
 	}
 	b.Events = kept
 	return b
+}
+
+// dropColumns removes the drop_columns from Before and After, never from Key.
+// It returns e itself when nothing is removed, else a copy with fresh maps.
+func (c *Chain) dropColumns(e *event.Event) *event.Event {
+	cols := c.tables[e.Schema+"."+e.Table].drop
+	if !hasAny(e.Before, cols) && !hasAny(e.After, cols) {
+		return e
+	}
+	cp := *e
+	cp.Before = without(e.Before, cols)
+	cp.After = without(e.After, cols)
+	return &cp
+}
+
+func hasAny(row map[string]any, cols []string) bool {
+	return slices.ContainsFunc(cols, func(c string) bool { _, ok := row[c]; return ok })
+}
+
+func without(row map[string]any, cols []string) map[string]any {
+	if row == nil {
+		return nil
+	}
+	out := maps.Clone(row)
+	for _, c := range cols {
+		delete(out, c)
+	}
+	return out
 }
 
 func (c *Chain) keep(e *event.Event) (ok bool, reason string) {

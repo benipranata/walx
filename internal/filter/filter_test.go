@@ -3,6 +3,7 @@ package filter_test
 import (
 	"bytes"
 	"log/slog"
+	"maps"
 	"math"
 	"strings"
 	"testing"
@@ -271,4 +272,82 @@ func TestChainRowFilterDropIsCounted(t *testing.T) {
 			require.Contains(t, buf.String(), "where does not match")
 		})
 	}
+}
+
+func TestChainDropColumns(t *testing.T) {
+	tests := []struct {
+		name       string
+		table      config.TableConfig
+		in         *event.Event
+		wantBefore map[string]any
+		wantAfter  map[string]any
+		wantKey    map[string]any
+	}{
+		{
+			"removed from before and after, key kept",
+			config.TableConfig{Name: "public.users", Ops: []event.Op{event.OpUpdate}, DropColumns: []string{"id", "secret"}},
+			&event.Event{Op: event.OpUpdate, Schema: "public", Table: "users",
+				Before: map[string]any{"id": 1, "secret": "a", "name": "x"},
+				After:  map[string]any{"id": 1, "secret": "b", "name": "y"},
+				Key:    map[string]any{"id": 1}},
+			map[string]any{"name": "x"},
+			map[string]any{"name": "y"},
+			map[string]any{"id": 1},
+		},
+		{
+			"insert has no before",
+			config.TableConfig{Name: "public.users", DropColumns: []string{"secret"}},
+			&event.Event{Op: event.OpInsert, Schema: "public", Table: "users",
+				After: map[string]any{"secret": "b", "name": "y"}},
+			nil,
+			map[string]any{"name": "y"},
+			nil,
+		},
+		{
+			"missing column is a no-op",
+			config.TableConfig{Name: "public.users", DropColumns: []string{"nope"}},
+			&event.Event{Op: event.OpInsert, Schema: "public", Table: "users",
+				After: map[string]any{"name": "y"}},
+			nil,
+			map[string]any{"name": "y"},
+			nil,
+		},
+		{
+			"where and on_change still see dropped columns",
+			config.TableConfig{Name: "public.users", Ops: []event.Op{event.OpUpdate}, DropColumns: []string{"status"},
+				Where: map[string]any{"status": "on"}, OnChange: []string{"status"}},
+			&event.Event{Op: event.OpUpdate, Schema: "public", Table: "users",
+				Before: map[string]any{"status": "off", "name": "x"},
+				After:  map[string]any{"status": "on", "name": "x"}},
+			map[string]any{"name": "x"},
+			map[string]any{"name": "x"},
+			nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := filter.New("db", []config.TableConfig{tt.table}, nil, nil)
+			orig := *tt.in
+			origBefore := maps.Clone(tt.in.Before)
+			origAfter := maps.Clone(tt.in.After)
+
+			out := c.Apply(event.Batch{Events: []*event.Event{tt.in}})
+
+			require.Len(t, out.Events, 1)
+			got := out.Events[0]
+			require.Equal(t, tt.wantBefore, got.Before)
+			require.Equal(t, tt.wantAfter, got.After)
+			require.Equal(t, tt.wantKey, got.Key)
+			require.Equal(t, origBefore, tt.in.Before, "input Before mutated")
+			require.Equal(t, origAfter, tt.in.After, "input After mutated")
+			require.Equal(t, orig.Key, tt.in.Key)
+		})
+	}
+}
+
+func TestChainDropColumnsNoCopyWhenUntouched(t *testing.T) {
+	c := filter.New("db", []config.TableConfig{{Name: "public.users", DropColumns: []string{"secret"}}}, nil, nil)
+	in := &event.Event{Op: event.OpInsert, Schema: "public", Table: "users", After: map[string]any{"name": "y"}}
+	out := c.Apply(event.Batch{Events: []*event.Event{in}})
+	require.Same(t, in, out.Events[0])
 }
