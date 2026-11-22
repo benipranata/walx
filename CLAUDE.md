@@ -115,3 +115,8 @@ Never mention the plan (task IDs like `T4.5`, milestones like `M4`, "the plan") 
 - Snapshot: `Event.ID` is `<name>-<consistentLSN>-<seq>`, seq over all rows before filters; a rerun has a new consistent LSN, so IDs only dedupe retries within one run. `CommitTS` is the start time, `TxID` 0, `LSN` and batch `CommitLSN`/`EndLSN` the consistent point.
 - Snapshot: `deliverer` repeats the engine's retry, permanent-skip and sink-timeout semantics (the engine's wrappers are methods on `Engine`); keep them in step. cmd: `selectSnapshot` errors exit 2, `-where` needs exactly one selected table, `-table` must be a listed table when the entry lists any.
 - Snapshot tests: the sink's first `Send` is the hook to write concurrently after the consistent point; read the live slot with `pg_logical_slot_get_binary_changes` through a `TxBuffer`, on a session with the same pinned settings (`SET intervalstyle ...`), or intervals differ.
+
+## Release
+
+- Tag `vX.Y.Z` on `main` triggers `.github/workflows/release.yml`: tests, then linux/darwin (amd64, arm64) tarballs plus `checksums.txt` on a GitHub Release, and a multi-arch image `<DOCKERHUB_USERNAME>/walx` (`:vX.Y.Z`, `:latest`). Repo secrets: `DOCKERHUB_USERNAME`, `DOCKERHUB_TOKEN`.
+- The version comes from `-ldflags "-X main.version=..."` (default `dev`; `walx version`). Builds use `CGO_ENABLED=0 -trimpath -ldflags="-s -w"`; the `Dockerfile` is multi-stage onto `distroless/static:nonroot` (config at `/etc/walx/config.yaml`).
