@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -17,52 +16,6 @@ import (
 	"github.com/benipranata/walx/internal/event"
 	"github.com/benipranata/walx/internal/sink/dlq"
 )
-
-// fakeDeadLetter records SendFailed calls; errs are returned in order, then nil.
-type fakeDeadLetter struct {
-	mu      sync.Mutex
-	errs    []error
-	gate    chan struct{} // when set, SendFailed waits for it to close
-	batches []event.Batch
-	causes  []error
-	calls   int
-	closed  int
-}
-
-func (f *fakeDeadLetter) SendFailed(ctx context.Context, b event.Batch, cause error) error {
-	if f.gate != nil {
-		select {
-		case <-f.gate:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.calls++
-	var err error
-	if len(f.errs) > 0 {
-		err, f.errs = f.errs[0], f.errs[1:]
-	}
-	if err == nil {
-		f.batches = append(f.batches, b)
-		f.causes = append(f.causes, cause)
-	}
-	return err
-}
-
-func (f *fakeDeadLetter) Close() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.closed++
-	return nil
-}
-
-func (f *fakeDeadLetter) snapshot() (calls, closed int, batches []event.Batch, causes []error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.calls, f.closed, append([]event.Batch(nil), f.batches...), append([]error(nil), f.causes...)
-}
 
 func TestDeadLetterSkip(t *testing.T) {
 	boom := errors.New("boom")
@@ -90,10 +43,10 @@ func TestDeadLetterSkip(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dl := &fakeDeadLetter{errs: tt.dlqErrs}
+			dl := newDLRecorder(t, tt.dlqErrs, false)
 			sink := event.SinkFunc(func(context.Context, event.Batch) error { return tt.sinkErr })
 			var out strings.Builder
-			m := &countMetrics{}
+			m := newRecMetrics(t)
 			e := New(Config{Name: "orders", Source: newFakeSource(), Sink: sink, DeadLetter: dl, Metrics: m,
 				Logger: slog.New(slog.NewJSONHandler(&out, nil)), OnPermanentError: tt.mode, Retry: retryCfg(tt.policy, 2)})
 			e.sleep = func(context.Context, time.Duration) error { return nil }
@@ -144,7 +97,7 @@ func TestDeadLetterConfirmOrder(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			src := newFakeSource()
-			dl := &fakeDeadLetter{errs: tt.dlqErrs, gate: make(chan struct{})}
+			dl := newDLRecorder(t, tt.dlqErrs, true)
 			sink := event.SinkFunc(func(context.Context, event.Batch) error { return event.Permanent(errors.New("bad")) })
 			e := New(Config{Name: "a", Source: src, Sink: sink, DeadLetter: dl, OnPermanentError: "skip"})
 			stubDecode(e)

@@ -8,10 +8,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
+	evmock "github.com/benipranata/walx/internal/event/mock"
 	"github.com/benipranata/walx/internal/filter"
 )
 
@@ -21,13 +23,16 @@ type count struct {
 	labels []string
 }
 
-type recorder struct {
-	event.NopMetrics
-	counts []count
-}
-
-func (r *recorder) Count(name string, delta float64, labels ...string) {
-	r.counts = append(r.counts, count{name, delta, labels})
+// newRecorder returns a MockMetrics that records every Count call.
+func newRecorder(t *testing.T) (*evmock.MockMetrics, *[]count) {
+	m := evmock.NewMockMetrics(t)
+	var counts []count
+	record := func(name string, delta float64, labels ...string) {
+		counts = append(counts, count{name, delta, labels})
+	}
+	m.EXPECT().Count(mock.Anything, mock.Anything).Run(record).Maybe()
+	m.EXPECT().Count(mock.Anything, mock.Anything, mock.Anything).Run(record).Maybe()
+	return m, &counts
 }
 
 func ev(op event.Op, schema, table string) *event.Event {
@@ -131,7 +136,7 @@ func TestChainMetricsAndLog(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := &recorder{}
+			rec, counts := newRecorder(t)
 			var buf bytes.Buffer
 			var log *slog.Logger
 			var m event.Metrics = rec
@@ -146,7 +151,7 @@ func TestChainMetricsAndLog(t *testing.T) {
 				ev(event.OpDelete, "public", "a"), ev(event.OpDelete, "public", "a"), ev(event.OpInsert, "public", "b"),
 			}})
 
-			require.Equal(t, tt.wantCounts, rec.counts)
+			require.Equal(t, tt.wantCounts, *counts)
 			if tt.wantLogs == 0 {
 				require.Empty(t, buf.String())
 				return
@@ -300,7 +305,7 @@ func TestChainRowFilterDropIsCounted(t *testing.T) {
 	}{{"where drop counted and logged once"}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := &recorder{}
+			rec, counts := newRecorder(t)
 			var buf bytes.Buffer
 			c := filter.New("db1", []config.TableConfig{{Name: "public.a", Where: map[string]any{"s": "a"}}}, rec, slog.New(slog.NewTextHandler(&buf, nil)))
 			e := ev(event.OpInsert, "public", "a")
@@ -311,7 +316,7 @@ func TestChainRowFilterDropIsCounted(t *testing.T) {
 			require.Equal(t, []count{
 				{"events_dropped_total", 1, []string{"database", "db1", "op", "insert", "table", "public.a"}},
 				{"events_dropped_total", 1, []string{"database", "db1", "op", "insert", "table", "public.a"}},
-			}, rec.counts)
+			}, *counts)
 			require.Equal(t, 1, strings.Count(buf.String(), "\n"))
 			require.Contains(t, buf.String(), "where does not match")
 		})

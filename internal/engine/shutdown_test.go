@@ -15,29 +15,6 @@ import (
 	"github.com/benipranata/walx/internal/event"
 )
 
-// closeSink counts Close calls and delegates Send.
-type closeSink struct {
-	send   func(ctx context.Context, b event.Batch) error
-	closed atomic.Int32
-}
-
-func (s *closeSink) Send(ctx context.Context, b event.Batch) error { return s.send(ctx, b) }
-
-func (s *closeSink) Close() error { s.closed.Add(1); return nil }
-
-// finalSource records how many LSNs were confirmed when its context ended,
-// which is when Standby sends its final status update.
-type finalSource struct {
-	*fakeSource
-	atFinal chan int
-}
-
-func (f *finalSource) Run(ctx context.Context) error {
-	err := f.fakeSource.Run(ctx)
-	f.atFinal <- len(f.Confirmed())
-	return err
-}
-
 func TestShutdown(t *testing.T) {
 	tests := []struct {
 		name string
@@ -46,22 +23,22 @@ func TestShutdown(t *testing.T) {
 		{name: "cancel mid-call lets the call finish, confirms, then closes once", run: func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			src := &finalSource{fakeSource: newFakeSource(), atFinal: make(chan int, 1)}
+			src := newFinalSource()
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			var calls atomic.Int32
 			var sendCtxErr atomic.Value
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				calls.Add(1)
 				close(entered)
 				<-release
 				sendCtxErr.Store(c.Err() == nil)
 				return nil
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink})
 			stubDecode(e)
 			done := runEngine(ctx, e)
-			feed(ctx, src.fakeSource, 3)
+			feed(ctx, src, 3)
 			<-entered
 			cancel()
 			select {
@@ -84,7 +61,7 @@ func TestShutdown(t *testing.T) {
 			defer cancel()
 			src := newFakeSource()
 			waiting := make(chan struct{})
-			sink := &closeSink{send: func(context.Context, event.Batch) error { return errors.New("down") }}
+			sink := newCloseSink(t, func(context.Context, event.Batch) error { return errors.New("down") })
 			e := New(Config{Name: "a", Source: src, Sink: sink, Retry: config.RetryConfig{Policy: "forever"}})
 			stubDecode(e)
 			e.sleep = func(c context.Context, _ time.Duration) error {
@@ -108,11 +85,11 @@ func TestShutdown(t *testing.T) {
 			src := newFakeSource()
 			entered := make(chan struct{})
 			release := make(chan struct{})
-			sink := &closeSink{send: func(context.Context, event.Batch) error {
+			sink := newCloseSink(t, func(context.Context, event.Batch) error {
 				close(entered)
 				<-release
 				return nil
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink, ShutdownTimeout: 7 * time.Second})
 			stubDecode(e)
 			fire := make(chan time.Time)
@@ -139,11 +116,11 @@ func TestShutdown(t *testing.T) {
 			src := newFakeSource()
 			entered := make(chan struct{})
 			release := make(chan struct{})
-			sink := &closeSink{send: func(context.Context, event.Batch) error {
+			sink := newCloseSink(t, func(context.Context, event.Batch) error {
 				close(entered)
 				<-release
 				return nil
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink})
 			stubDecode(e)
 			done := runEngine(context.Background(), e)
@@ -163,11 +140,9 @@ func TestShutdown(t *testing.T) {
 			entered := make(chan struct{})
 			release := make(chan struct{})
 			closeEntered := make(chan struct{})
-			sink := &blockCloseSink{
-				closeSink:    closeSink{send: func(context.Context, event.Batch) error { close(entered); <-release; return nil }},
-				closeEntered: closeEntered,
-				closeRelease: release,
-			}
+			sink := newCloseFuncSink(t,
+				func(context.Context, event.Batch) error { close(entered); <-release; return nil },
+				func() error { close(closeEntered); <-release; return nil })
 			e := New(Config{Name: "a", Source: src, Sink: sink, ShutdownTimeout: time.Second})
 			stubDecode(e)
 			fire := make(chan time.Time)
@@ -192,7 +167,7 @@ func TestShutdown(t *testing.T) {
 		{name: "close error is logged and does not fail the run", run: func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			src := newFakeSource()
-			e := New(Config{Name: "a", Source: src, Sink: errCloser{}})
+			e := New(Config{Name: "a", Source: src, Sink: newCloseFuncSink(t, func(context.Context, event.Batch) error { return nil }, func() error { return errors.New("close boom") })})
 			done := runEngine(ctx, e)
 			cancel()
 			require.ErrorIs(t, wait(t, done), context.Canceled)
@@ -210,23 +185,4 @@ func TestShutdown(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)
 	}
-}
-
-type errCloser struct{}
-
-func (errCloser) Send(context.Context, event.Batch) error { return nil }
-
-func (errCloser) Close() error { return errors.New("close boom") }
-
-// blockCloseSink blocks Close until closeRelease is closed.
-type blockCloseSink struct {
-	closeSink
-	closeEntered chan struct{}
-	closeRelease chan struct{}
-}
-
-func (s *blockCloseSink) Close() error {
-	close(s.closeEntered)
-	<-s.closeRelease
-	return nil
 }

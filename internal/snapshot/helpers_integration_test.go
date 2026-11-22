@@ -11,10 +11,12 @@ import (
 
 	"github.com/jackc/pglogrepl"
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
+	evmock "github.com/benipranata/walx/internal/event/mock"
 	"github.com/benipranata/walx/internal/postgres"
 )
 
@@ -58,16 +60,24 @@ func mustExec(t *testing.T, c *pgx.Conn, sql string, args ...any) {
 	require.NoError(t, err, sql)
 }
 
-// collector is a sink that records batches. onSend, when set, runs before the
-// batch n (1-based) is recorded and may fail it.
+// collector is a MockSink wired to record batches. onSend, when set, runs
+// before the batch n (1-based) is recorded and may fail it.
 type collector struct {
+	*evmock.MockSink
 	mu      sync.Mutex
 	batches []event.Batch
 	calls   int
 	onSend  func(n int) error
 }
 
-func (c *collector) Send(_ context.Context, b event.Batch) error {
+func newCollector(t *testing.T) *collector {
+	c := &collector{MockSink: evmock.NewMockSink(t)}
+	c.EXPECT().Send(mock.Anything, mock.Anything).RunAndReturn(c.send).Maybe()
+	c.EXPECT().Close().Return(nil).Maybe()
+	return c
+}
+
+func (c *collector) send(_ context.Context, b event.Batch) error {
 	c.mu.Lock()
 	c.calls++
 	n := c.calls
@@ -83,8 +93,6 @@ func (c *collector) Send(_ context.Context, b event.Batch) error {
 	c.batches = append(c.batches, b)
 	return nil
 }
-
-func (c *collector) Close() error { return nil }
 
 func (c *collector) events() []*event.Event {
 	c.mu.Lock()

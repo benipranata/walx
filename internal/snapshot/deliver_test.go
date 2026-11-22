@@ -7,18 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
+	evmock "github.com/benipranata/walx/internal/event/mock"
 )
 
-type countMetrics struct {
-	event.NopMetrics
-	counts map[string]float64
+// newCountMetrics returns a MockMetrics that sums every Count by name.
+func newCountMetrics(t *testing.T) (*evmock.MockMetrics, map[string]float64) {
+	m := evmock.NewMockMetrics(t)
+	counts := map[string]float64{}
+	add := func(name string, d float64, _ ...string) { counts[name] += d }
+	m.EXPECT().Count(mock.Anything, mock.Anything).Run(add).Maybe()
+	m.EXPECT().Count(mock.Anything, mock.Anything, mock.Anything).Run(add).Maybe()
+	m.EXPECT().Observe(mock.Anything, mock.Anything, mock.Anything).Maybe()
+	m.EXPECT().Gauge(mock.Anything, mock.Anything, mock.Anything).Maybe()
+	return m, counts
 }
-
-func (m *countMetrics) Count(name string, d float64, _ ...string) { m.counts[name] += d }
 
 func TestDeliver(t *testing.T) {
 	boom := errors.New("boom")
@@ -47,7 +54,7 @@ func TestDeliver(t *testing.T) {
 				calls++
 				return tt.results[calls-1]
 			})
-			m := &countMetrics{counts: map[string]float64{}}
+			m, counts := newCountMetrics(t)
 			d := &deliverer{name: "db", log: slog.New(slog.DiscardHandler), sink: s, retry: tt.retry, onPermanent: tt.onPerm, metrics: m,
 				sleep: func(context.Context, time.Duration) error { return nil }}
 			err := d.send(context.Background(), event.Batch{Events: []*event.Event{{}, {}}})
@@ -57,8 +64,8 @@ func TestDeliver(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, tt.wantCalls, calls)
-			require.Equal(t, tt.wantTotal, m.counts["events_total"])
-			require.Equal(t, tt.wantSkip, m.counts["events_skipped_total"])
+			require.Equal(t, tt.wantTotal, counts["events_total"])
+			require.Equal(t, tt.wantSkip, counts["events_skipped_total"])
 		})
 	}
 }
@@ -93,28 +100,33 @@ func TestDeliverTimeoutAndCancel(t *testing.T) {
 	}
 }
 
-type fakeDeadLetter struct {
-	errs    []error
+// deadLetterRecord holds what a MockDeadLetter saw.
+type deadLetterRecord struct {
 	calls   int
 	batches []event.Batch
 	causes  []error
 }
 
-func (f *fakeDeadLetter) SendFailed(_ context.Context, b event.Batch, cause error) error {
-	f.calls++
-	if len(f.errs) > 0 {
-		err := f.errs[0]
-		f.errs = f.errs[1:]
-		if err != nil {
-			return err
-		}
-	}
-	f.batches = append(f.batches, b)
-	f.causes = append(f.causes, cause)
-	return nil
+// newDeadLetter returns a MockDeadLetter that fails with errs in order, then stores batches.
+func newDeadLetter(t *testing.T, errs []error) (*evmock.MockDeadLetter, *deadLetterRecord) {
+	dl := evmock.NewMockDeadLetter(t)
+	rec := &deadLetterRecord{}
+	dl.EXPECT().SendFailed(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(_ context.Context, b event.Batch, cause error) error {
+			rec.calls++
+			if len(errs) > 0 {
+				err := errs[0]
+				errs = errs[1:]
+				if err != nil {
+					return err
+				}
+			}
+			rec.batches = append(rec.batches, b)
+			rec.causes = append(rec.causes, cause)
+			return nil
+		}).Maybe()
+	return dl, rec
 }
-
-func (f *fakeDeadLetter) Close() error { return nil }
 
 func TestDeliverDeadLetter(t *testing.T) {
 	boom := errors.New("boom")
@@ -139,8 +151,8 @@ func TestDeliverDeadLetter(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			s := event.SinkFunc(func(context.Context, event.Batch) error { return tt.sinkErr })
-			dl := &fakeDeadLetter{errs: tt.dlqErrs}
-			m := &countMetrics{counts: map[string]float64{}}
+			dl, rec := newDeadLetter(t, tt.dlqErrs)
+			m, counts := newCountMetrics(t)
 			d := &deliverer{name: "db", log: slog.New(slog.DiscardHandler), sink: s, deadLetter: dl, retry: tt.retry, onPermanent: tt.onPerm,
 				metrics: m, timeout: time.Minute, sleep: func(context.Context, time.Duration) error { return nil }}
 			b := event.Batch{Events: []*event.Event{{ID: "a"}, {ID: "b"}}}
@@ -150,13 +162,13 @@ func TestDeliverDeadLetter(t *testing.T) {
 			} else {
 				require.NoError(t, err)
 			}
-			require.Equal(t, tt.wantCalls, dl.calls)
-			require.Len(t, dl.batches, tt.wantStored)
+			require.Equal(t, tt.wantCalls, rec.calls)
+			require.Len(t, rec.batches, tt.wantStored)
 			if tt.wantStored > 0 {
-				require.Equal(t, b, dl.batches[0])
-				require.ErrorIs(t, dl.causes[0], boom)
+				require.Equal(t, b, rec.batches[0])
+				require.ErrorIs(t, rec.causes[0], boom)
 			}
-			require.Equal(t, tt.wantSkip, m.counts["events_skipped_total"])
+			require.Equal(t, tt.wantSkip, counts["events_skipped_total"])
 		})
 	}
 }

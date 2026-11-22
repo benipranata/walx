@@ -23,44 +23,6 @@ import (
 
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
-// fakeSource is a Source fed from the test.
-type fakeSource struct {
-	out       chan pglogrepl.XLogData
-	ka        chan pglogrepl.LSN
-	runErr    chan error
-	mu        sync.Mutex
-	confirmed []pglogrepl.LSN
-}
-
-func newFakeSource() *fakeSource {
-	return &fakeSource{out: make(chan pglogrepl.XLogData), ka: make(chan pglogrepl.LSN, 1), runErr: make(chan error, 1)}
-}
-
-func (f *fakeSource) Run(ctx context.Context) error {
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case err := <-f.runErr:
-		return err
-	}
-}
-
-func (f *fakeSource) Messages() <-chan pglogrepl.XLogData { return f.out }
-
-func (f *fakeSource) Keepalives() <-chan pglogrepl.LSN { return f.ka }
-
-func (f *fakeSource) SetConfirmed(l pglogrepl.LSN) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.confirmed = append(f.confirmed, l)
-}
-
-func (f *fakeSource) Confirmed() []pglogrepl.LSN {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]pglogrepl.LSN(nil), f.confirmed...)
-}
-
 // feed queues n messages whose decode (stubbed) yields one batch each; batch i
 // has EndLSN 10*i and one event.
 func feed(ctx context.Context, src *fakeSource, n int) {

@@ -47,7 +47,7 @@ INSERT INTO lines SELECT 't' || (g % 3), g, CASE WHEN g % 2 = 0 THEN NULL ELSE '
 		t.Run(tt.name, func(t *testing.T) {
 			url := startPostgres(t)
 			mustExec(t, connect(t, url), tt.setup)
-			s := &collector{}
+			s := newCollector(t)
 			cfg := baseConfig(url, s)
 			cfg.Chunk = tt.chunk
 			cfg.Targets = []Target{{Table: tt.table}}
@@ -116,7 +116,7 @@ func TestSnapshotMatchesLiveStreamWithoutGaps(t *testing.T) {
 			require.NoError(t, c.QueryRow(context.Background(), `SELECT confirmed_flush_lsn::text FROM pg_replication_slots WHERE slot_name = 'live'`).Scan(&slotBefore))
 			mustExec(t, c, `INSERT INTO t SELECT g, 'old' FROM generate_series(1, 30) g`)
 
-			s := &collector{}
+			s := newCollector(t)
 			s.onSend = func(n int) error {
 				if n != 1 {
 					return nil
@@ -196,7 +196,7 @@ func TestSnapshotValuesMatchLiveDecode(t *testing.T) {
 			live := newLiveStream(t, url)
 			mustExec(t, c, tt.insert)
 
-			s := &collector{}
+			s := newCollector(t)
 			cfg := baseConfig(url, s)
 			_, err := Run(context.Background(), cfg)
 			require.NoError(t, err)
@@ -277,7 +277,7 @@ INSERT INTO other.c VALUES (9);`
 		t.Run(tt.name, func(t *testing.T) {
 			url := startPostgres(t)
 			mustExec(t, connect(t, url), setup)
-			s := &collector{}
+			s := newCollector(t)
 			cfg := baseConfig(url, s)
 			cfg.Targets = tt.targets
 			cfg.Tables = tt.tables
@@ -327,7 +327,7 @@ func TestSnapshotErrors(t *testing.T) {
 			url := startPostgres(t)
 			c := connect(t, url)
 			mustExec(t, c, tt.setup)
-			s := &collector{}
+			s := newCollector(t)
 			cfg := baseConfig(url, s)
 			cfg.Targets = tt.targets
 			cfg.Tables = tt.tables
@@ -376,7 +376,8 @@ func TestSnapshotSinkPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			url := startPostgres(t)
 			mustExec(t, connect(t, url), `CREATE TABLE a (id int PRIMARY KEY); INSERT INTO a SELECT generate_series(1, 20)`)
-			s := &collector{onSend: tt.fail}
+			s := newCollector(t)
+			s.onSend = tt.fail
 			cfg := baseConfig(url, s)
 			cfg.Chunk = 10
 			cfg.Retry = tt.retry
@@ -404,7 +405,7 @@ func TestSnapshotRunErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := baseConfig("postgres://u:p@127.0.0.1:1/x", &collector{})
+			cfg := baseConfig("postgres://u:p@127.0.0.1:1/x", newCollector(t))
 			tt.mutate(&cfg)
 			_, err := Run(context.Background(), cfg)
 			require.ErrorContains(t, err, tt.wantErr)

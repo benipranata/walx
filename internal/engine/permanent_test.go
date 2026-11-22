@@ -6,7 +6,6 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -15,46 +14,6 @@ import (
 	"github.com/benipranata/walx/internal/event"
 	"github.com/benipranata/walx/internal/postgres"
 )
-
-type countMetrics struct {
-	mu     sync.Mutex
-	counts map[string]float64
-	labels map[string][]string
-	obs    map[string][]float64
-}
-
-func (m *countMetrics) Count(name string, delta float64, labels ...string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.counts == nil {
-		m.counts, m.labels = map[string]float64{}, map[string][]string{}
-	}
-	m.counts[name] += delta
-	m.labels[name] = labels
-}
-
-func (m *countMetrics) Gauge(string, float64, ...string) {}
-
-func (m *countMetrics) Observe(name string, v float64, _ ...string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.obs == nil {
-		m.obs = map[string][]float64{}
-	}
-	m.obs[name] = append(m.obs[name], v)
-}
-
-func (m *countMetrics) observed(name string) []float64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]float64(nil), m.obs[name]...)
-}
-
-func (m *countMetrics) get(name string) float64 {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.counts[name]
-}
 
 func TestPermanentErrors(t *testing.T) {
 	boom := errors.New("boom")
@@ -79,7 +38,7 @@ func TestPermanentErrors(t *testing.T) {
 			sink := event.SinkFunc(func(context.Context, event.Batch) error { calls++; return tt.sinkErr })
 			var out strings.Builder
 			log := slog.New(slog.NewJSONHandler(&out, nil))
-			m := &countMetrics{}
+			m := newRecMetrics(t)
 			e := New(Config{Name: "orders", Source: newFakeSource(), Sink: sink, Logger: log, Metrics: m,
 				OnPermanentError: tt.mode, Retry: retryCfg("stop", 0)})
 			e.sleep = func(context.Context, time.Duration) error { return nil }
@@ -117,7 +76,7 @@ func TestPermanentSkipConfirms(t *testing.T) {
 			defer cancel()
 			src := newFakeSource()
 			sink := event.SinkFunc(func(context.Context, event.Batch) error { return event.Permanent(errors.New("bad")) })
-			m := &countMetrics{}
+			m := newRecMetrics(t)
 			e := New(Config{Name: "a", Source: src, Sink: sink, Metrics: m, OnPermanentError: "skip"})
 			stubDecode(e)
 			done := runEngine(ctx, e)

@@ -29,11 +29,11 @@ func TestSinkMetrics(t *testing.T) {
 			defer cancel()
 			src := newFakeSource()
 			calls := 0
-			sink := &closeSink{send: func(context.Context, event.Batch) error {
+			sink := newCloseSink(t, func(context.Context, event.Batch) error {
 				calls++
 				return tt.errs[calls-1]
-			}}
-			m := &countMetrics{}
+			})
+			m := newRecMetrics(t)
 			e := New(Config{Name: "a", Source: src, Sink: sink, Metrics: m, Retry: config.RetryConfig{Policy: "forever"}})
 			stubDecode(e)
 			e.sleep = (&fakeClock{}).sleep
@@ -60,7 +60,7 @@ func TestSinkMetricsSkippedBatchNotCounted(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			sink := event.SinkFunc(func(context.Context, event.Batch) error { return event.Permanent(errors.New("bad")) })
-			m := &countMetrics{}
+			m := newRecMetrics(t)
 			e := New(Config{Name: "a", Source: newFakeSource(), Sink: sink, Metrics: m, OnPermanentError: tt.mode})
 			_ = e.send(context.Background(), event.Batch{Events: []*event.Event{{ID: "a-0/1-1"}}})
 			require.Zero(t, m.get("events_total"))

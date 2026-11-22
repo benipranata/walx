@@ -8,28 +8,34 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/benipranata/walx/internal/event"
+	evmock "github.com/benipranata/walx/internal/event/mock"
 )
 
-type gaugeMetrics struct {
-	event.NopMetrics
+// gaugeStore keeps the last value and labels of every Gauge call on its mock.
+type gaugeStore struct {
+	*evmock.MockMetrics
 	mu     sync.Mutex
 	gauges map[string]float64
 	labels map[string][]string
 }
 
-func (m *gaugeMetrics) Gauge(name string, v float64, labels ...string) {
+func newGaugeMetrics(t *testing.T) *gaugeStore {
+	m := &gaugeStore{MockMetrics: evmock.NewMockMetrics(t), gauges: map[string]float64{}, labels: map[string][]string{}}
+	m.EXPECT().Gauge(mock.Anything, mock.Anything).Run(m.record).Maybe()
+	m.EXPECT().Gauge(mock.Anything, mock.Anything, mock.Anything).Run(m.record).Maybe()
+	return m
+}
+
+func (m *gaugeStore) record(name string, v float64, labels ...string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.gauges == nil {
-		m.gauges, m.labels = map[string]float64{}, map[string][]string{}
-	}
 	m.gauges[name], m.labels[name] = v, labels
 }
 
-func (m *gaugeMetrics) get(name string) (float64, bool) {
+func (m *gaugeStore) get(name string) (float64, bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	v, ok := m.gauges[name]
@@ -65,7 +71,7 @@ func TestLagPollerPoll(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &gaugeMetrics{}
+			m := newGaugeMetrics(t)
 			p := &LagPoller{name: "main", metrics: m, read: func(context.Context) (SlotLag, error) { return tt.lag, tt.err }}
 			require.ErrorIs(t, p.poll(context.Background()), tt.err)
 			lag, ok := m.get("slot_lag_bytes")
@@ -91,7 +97,7 @@ func TestLagPollerRun(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &gaugeMetrics{}
+			m := newGaugeMetrics(t)
 			var mu sync.Mutex
 			calls := 0
 			p := &LagPoller{name: "main", metrics: m, interval: time.Millisecond, read: func(context.Context) (SlotLag, error) {
@@ -126,7 +132,7 @@ func TestLagIntegration(t *testing.T) {
 	_, err = EnsureSlot(ctx, c.PgConn(), "lag_slot", true)
 	require.NoError(t, err)
 
-	m := &gaugeMetrics{}
+	m := newGaugeMetrics(t)
 	p := NewLagPoller(url, "main", "lag_slot", time.Second, m, nil)
 	defer p.Close(ctx)
 	require.NoError(t, p.poll(ctx))

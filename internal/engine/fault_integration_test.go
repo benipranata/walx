@@ -42,7 +42,7 @@ func TestFaultInjectionIntegration(t *testing.T) {
 		{name: "a crash between sink success and confirm redelivers the batch with the same IDs", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			const slot = "s_crash"
-			sink1 := &memSink{}
+			sink1 := newMemSink(t)
 			crashed := make(chan event.LSN, 1)
 			var p1 *pipeline
 			crash := func(e *Engine) {
@@ -93,7 +93,7 @@ func TestFaultInjectionIntegration(t *testing.T) {
 			require.Less(t, slotFlush(t, ctx, admin, slot), pglogrepl.LSN(first[0].CommitLSN))
 			require.Equal(t, before, slotFlush(t, ctx, admin, slot), "slot advanced without a confirm")
 
-			sink2 := &memSink{}
+			sink2 := newMemSink(t)
 			p2 := startPipeline(t, ctx, url, slot, sink2, 4, nil)
 			require.Eventually(t, func() bool { return len(sink2.Batches()) >= 1 }, 15*time.Second, 20*time.Millisecond)
 			second := sink2.Batches()
@@ -124,7 +124,7 @@ func TestFaultInjectionIntegration(t *testing.T) {
 						Name: "public.r",
 						Ops:  []event.Op{event.OpInsert, event.OpUpdate},
 					}}, nil, nil)
-					sink := &memSink{}
+					sink := newMemSink(t)
 					p := startPipeline(t, ctx, url, slot, sink, 4, chain.Apply)
 					tx, err := admin.Begin(ctx)
 					require.NoError(t, err)

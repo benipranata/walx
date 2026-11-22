@@ -16,35 +16,6 @@ import (
 	"github.com/benipranata/walx/internal/postgres"
 )
 
-// memSink is an in-memory sink that records batches and can block.
-type memSink struct {
-	mu      sync.Mutex
-	batches []event.Batch
-	gate    chan struct{} // when non-nil, Send waits for it to close
-}
-
-func (s *memSink) Send(ctx context.Context, b event.Batch) error {
-	if s.gate != nil {
-		select {
-		case <-s.gate:
-		case <-ctx.Done():
-			return ctx.Err()
-		}
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.batches = append(s.batches, b)
-	return nil
-}
-
-func (s *memSink) Close() error { return nil }
-
-func (s *memSink) Batches() []event.Batch {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]event.Batch(nil), s.batches...)
-}
-
 type pipeline struct {
 	engine  *Engine
 	standby *postgres.Standby
@@ -131,7 +102,7 @@ func TestEngineIntegration(t *testing.T) {
 	}{
 		{name: "ordered batches and an advancing confirmed_flush_lsn", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-			sink := &memSink{}
+			sink := newMemSink(t)
 			p := startPipeline(t, ctx, url, "s_order", sink, 4, nil)
 			start := slotFlush(t, ctx, admin, "s_order")
 			for i := 1; i <= 10; i++ {
@@ -157,7 +128,7 @@ func TestEngineIntegration(t *testing.T) {
 		}},
 		{name: "a transaction on an ignored table moves confirmed_flush_lsn", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-			sink := &memSink{}
+			sink := newMemSink(t)
 			p := startPipeline(t, ctx, url, "s_ignored", sink, 4, nil)
 			before := slotFlush(t, ctx, admin, "s_ignored")
 			_, err := admin.Exec(ctx, `INSERT INTO ignored VALUES (1)`)
@@ -173,7 +144,7 @@ func TestEngineIntegration(t *testing.T) {
 		}},
 		{name: "dropped deletes move confirmed_flush_lsn", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-			sink := &memSink{}
+			sink := newMemSink(t)
 			dropDeletes := func(b event.Batch) event.Batch {
 				var keep []*event.Event
 				for _, ev := range b.Events {
@@ -202,7 +173,7 @@ func TestEngineIntegration(t *testing.T) {
 		{name: "a sink blocked past wal_sender_timeout keeps the connection and a bounded queue", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			const queue, rows = 2, 40
-			sink := &memSink{gate: make(chan struct{})}
+			sink := newGatedMemSink(t)
 			p := startPipeline(t, ctx, url, "s_block", sink, queue, nil)
 			before := slotFlush(t, ctx, admin, "s_block")
 			for i := 1; i <= rows; i++ {
@@ -231,7 +202,7 @@ func TestEngineIntegration(t *testing.T) {
 		}},
 		{name: "cancel mid-call finishes the call and confirms its end LSN", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
-			sink := &memSink{gate: make(chan struct{})}
+			sink := newGatedMemSink(t)
 			waiting := make(chan struct{})
 			var once sync.Once
 			p := startPipeline(t, ctx, url, "s_shutdown", sink, 4, nil, func(e *Engine) {

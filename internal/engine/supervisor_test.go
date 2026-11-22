@@ -107,7 +107,7 @@ func TestSupervisorEngines(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			srcA, srcB := newFakeSource(), newFakeSource()
-			sinkA, sinkB := &memSink{}, &memSink{}
+			sinkA, sinkB := newMemSink(t), newMemSink(t)
 			a := New(Config{Name: "a", Source: srcA, Sink: sinkA})
 			b := New(Config{Name: "b", Source: srcB, Sink: sinkB})
 			stubDecode(a)
@@ -130,21 +130,21 @@ func TestSupervisorEngines(t *testing.T) {
 		{name: "a permanent error in one stops the other gracefully", run: func(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			srcA, srcB := &finalSource{fakeSource: newFakeSource(), atFinal: make(chan int, 1)}, newFakeSource()
+			srcA, srcB := newFinalSource(), newFakeSource()
 			entered, release := make(chan struct{}), make(chan struct{})
 			var finished atomic.Bool
-			sinkA := &closeSink{send: func(context.Context, event.Batch) error {
+			sinkA := newCloseSink(t, func(context.Context, event.Batch) error {
 				close(entered)
 				<-release
 				finished.Store(true)
 				return nil
-			}}
-			sinkB := &closeSink{send: func(context.Context, event.Batch) error { return event.Permanent(boom) }}
+			})
+			sinkB := newCloseSink(t, func(context.Context, event.Batch) error { return event.Permanent(boom) })
 			a := New(Config{Name: "a", Source: srcA, Sink: sinkA})
 			b := New(Config{Name: "b", Source: srcB, Sink: sinkB})
 			stubDecode(a)
 			stubDecode(b)
-			feed(ctx, srcA.fakeSource, 1)
+			feed(ctx, srcA, 1)
 			s := Supervisor{Engines: []Named{{"a", a.Run}, {"b", b.Run}}}
 			done := make(chan error, 1)
 			go func() { done <- s.Run(ctx) }()

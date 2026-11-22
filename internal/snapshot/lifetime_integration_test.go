@@ -106,7 +106,7 @@ ALTER DATABASE CURRENT_DB SET statement_timeout = '300ms'`,
 			mustExec(t, c, strings.ReplaceAll(tt.setup, "CURRENT_DB", dbName))
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
-			s := &collector{}
+			s := newCollector(t)
 			cfg := baseConfig(url, s)
 			tt.run(t, &cfg, s, cancel)
 			_, err := Run(ctx, cfg)

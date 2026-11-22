@@ -27,7 +27,7 @@ func TestSinkTimeout(t *testing.T) {
 			src := newFakeSource()
 			var calls atomic.Int32
 			var deadlines atomic.Int32
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				if _, ok := c.Deadline(); ok {
 					deadlines.Add(1)
 				}
@@ -37,7 +37,7 @@ func TestSinkTimeout(t *testing.T) {
 				}
 				require.Empty(t, src.Confirmed(), "nothing is confirmed before the call succeeds")
 				return nil
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink, SinkTimeout: 10 * time.Millisecond,
 				Retry: config.RetryConfig{Policy: "forever"}})
 			stubDecode(e)
@@ -55,10 +55,10 @@ func TestSinkTimeout(t *testing.T) {
 		}},
 		{name: "a timeout is not permanent, so skip mode does not drop the batch", run: func(t *testing.T) {
 			src := newFakeSource()
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				<-c.Done()
 				return c.Err()
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink, SinkTimeout: 5 * time.Millisecond,
 				OnPermanentError: "skip", Retry: config.RetryConfig{Policy: "stop"}})
 			stubDecode(e)
@@ -72,11 +72,11 @@ func TestSinkTimeout(t *testing.T) {
 		{name: "max_attempts gives up after repeated timeouts", run: func(t *testing.T) {
 			src := newFakeSource()
 			var calls atomic.Int32
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				calls.Add(1)
 				<-c.Done()
 				return c.Err()
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink, SinkTimeout: 5 * time.Millisecond,
 				Retry: retryCfg("max_attempts", 2)})
 			stubDecode(e)
@@ -92,11 +92,11 @@ func TestSinkTimeout(t *testing.T) {
 			defer cancel()
 			src := newFakeSource()
 			var hasDeadline atomic.Bool
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				_, ok := c.Deadline()
 				hasDeadline.Store(ok)
 				return nil
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink})
 			stubDecode(e)
 			done := runEngine(ctx, e)
@@ -111,11 +111,11 @@ func TestSinkTimeout(t *testing.T) {
 			defer cancel()
 			src := newFakeSource()
 			entered := make(chan struct{})
-			sink := &closeSink{send: func(c context.Context, b event.Batch) error {
+			sink := newCloseSink(t, func(c context.Context, b event.Batch) error {
 				close(entered)
 				<-c.Done()
 				return c.Err()
-			}}
+			})
 			e := New(Config{Name: "a", Source: src, Sink: sink, SinkTimeout: 50 * time.Millisecond, ShutdownTimeout: time.Hour})
 			stubDecode(e)
 			done := runEngine(ctx, e)

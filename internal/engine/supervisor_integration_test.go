@@ -43,7 +43,7 @@ func TestSupervisorIntegration(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
-			sinkA, sinkB := &memSink{}, &memSink{}
+			sinkA, sinkB := newMemSink(t), newMemSink(t)
 			a, adminA := newDBEngine(t, ctx, "dba", "sup_a", sinkA)
 			b, adminB := newDBEngine(t, ctx, "dbb", "sup_b", sinkB)
 
