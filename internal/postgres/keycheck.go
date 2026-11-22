@@ -15,26 +15,36 @@ import (
 // ErrKey means a configured key does not fit the table.
 var ErrKey = errors.New("key")
 
-// CheckKeys validates the custom key of every listed table: each key column
-// must exist (error wrapping ErrKey), and a warning is returned for a key no
-// unique index covers, since the row it names may then not be unique. An
-// index covers a key when all its key columns (not INCLUDE columns) are key
-// columns and NULLs cannot repeat in it (NOT NULL columns or NULLS NOT DISTINCT).
-// A delete whose key lies outside the replica identity is checked by
+// CheckKeys validates the columns a listed table's config names: every column
+// of key, where, on_change, fsm_column and drop_columns must exist (error
+// wrapping ErrKey, naming the table, field and column; all missing columns of
+// a table are reported together). For a custom key it also returns a warning
+// when no unique index covers it, since the row it names may then not be
+// unique. An index covers a key when all its key columns (not INCLUDE columns)
+// are key columns and NULLs cannot repeat in it (NOT NULL columns or NULLS NOT
+// DISTINCT). A delete whose key lies outside the replica identity is checked by
 // EnsureReplicaIdentity.
 func CheckKeys(ctx context.Context, pg *pgconn.PgConn, db config.DatabaseConfig) (warnings []string, err error) {
 	for _, t := range db.Tables {
-		if len(t.Key) == 0 {
+		refs := columnRefs(t)
+		if len(refs) == 0 {
 			continue
 		}
 		cols, uniques, err := readKeyInfo(ctx, pg, t.Name)
 		if err != nil {
 			return warnings, err
 		}
-		for _, k := range t.Key {
-			if !slices.Contains(cols, k) {
-				return warnings, fmt.Errorf("table %s: %w: key column %q is not a column of %s", t.Name, ErrKey, k, t.Name)
+		var missing []string
+		for _, r := range refs {
+			if !slices.Contains(cols, r.Column) {
+				missing = append(missing, fmt.Sprintf("%s column %q is not a column of %s", r.Field, r.Column, t.Name))
 			}
+		}
+		if len(missing) > 0 {
+			return warnings, fmt.Errorf("table %s: %w: %s", t.Name, ErrKey, strings.Join(missing, "; "))
+		}
+		if len(t.Key) == 0 {
+			continue
 		}
 		covered := slices.ContainsFunc(uniques, func(u []string) bool {
 			return len(u) > 0 && !slices.ContainsFunc(u, func(c string) bool { return !slices.Contains(t.Key, c) })

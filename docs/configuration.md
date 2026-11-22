@@ -71,16 +71,16 @@ Required, `schema.table` (exactly one dot, no quotes). For partitioned tables us
 List of `insert`, `update`, `delete`, `truncate`. Default `[insert, update]`; an explicit list must not be empty or hold duplicates. The publication's `publish` option is the union of ops across tables; the filter enforces each table's own list. A `delete` or `truncate` event is never emitted unless listed here.
 
 ### `databases[].tables[].fsm_column`
-Optional column holding a state. The event keeps it (it cannot be in `drop_columns`), and the NATS sink uses the new value as the subject token and in the `Walx-State-From/To` headers. Needs `REPLICA IDENTITY FULL` to see the old state (set automatically). Several transitions of one row in one transaction give several events, never collapsed.
+Optional column holding a state. The event keeps it (it cannot be in `drop_columns`), and the NATS sink uses the new value as the subject token and in the `Walx-State-From/To` headers. Needs `REPLICA IDENTITY FULL` to see the old state (set automatically). Several transitions of one row in one transaction give several events, never collapsed. Startup fails when the column does not exist.
 
 ### `databases[].tables[].where`
-Map of column to scalar value. An event passes only when `After` equals every pair (`Before` for deletes; a truncate always passes). Plain equality, no expressions. Numbers compare by value; a text value is compared with a configured number by exact decimal value. An `Unchanged` TOAST value in `After` is read from `Before`, so under the default identity an update whose where column is an unchanged TOAST value is dropped; set `REPLICA IDENTITY FULL` yourself for that case (auto-set covers `where` for deletes only).
+Map of column to scalar value. An event passes only when `After` equals every pair (`Before` for deletes; a truncate always passes). Plain equality, no expressions. Startup fails when a column does not exist. Numbers compare by value; a text value is compared with a configured number by exact decimal value. An `Unchanged` TOAST value in `After` is read from `Before`, so under the default identity an update whose where column is an unchanged TOAST value is dropped; set `REPLICA IDENTITY FULL` yourself for that case (auto-set covers `where` for deletes only).
 
 ### `databases[].tables[].on_change`
-List of columns. An update passes only when one of them changed between `Before` and `After`. Applies to updates only; an unchanged TOAST value never counts as changed. Needs `REPLICA IDENTITY FULL` (set automatically); without an old row every update would be dropped.
+List of columns. An update passes only when one of them changed between `Before` and `After`. Applies to updates only; an unchanged TOAST value never counts as changed. Needs `REPLICA IDENTITY FULL` (set automatically); without an old row every update would be dropped. Startup fails when a column does not exist (a typo would otherwise drop every update).
 
 ### `databases[].tables[].drop_columns`
-List of columns removed from `Before` and `After` (never from the key). Must not contain the `fsm_column`. Events are copied, never mutated.
+List of columns removed from `Before` and `After` (never from the key). Must not contain the `fsm_column`. Events are copied, never mutated. Startup fails when a column does not exist.
 
 ### `databases[].tables[].key`
 List of columns forming `Event.Key`. Default: the primary key. Blank or duplicate names are errors, and startup fails when a column does not exist. Ideally covered by a unique index (startup warns when none is). On a delete the key must lie inside the replica identity: `FULL` covers any column and auto-set applies it for a delete-enabled table.

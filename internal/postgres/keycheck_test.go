@@ -72,6 +72,13 @@ func TestKeyChecksIntegration(t *testing.T) {
 		{"expression index does not count", db(true, keyed("public.expr", nil, "tag")), "", []string{"public.expr"}},
 		{"invalid index does not count", db(true, keyed("public.broken", nil, "tag")), "", []string{"public.broken"}},
 		{"not null unique is covered", db(true, keyed("public.two", nil, "email")), "", nil},
+		{"typo in on_change", db(true, config.TableConfig{Name: "public.two", OnChange: []string{"nope"}}), `on_change column "nope" is not a column of public.two`, nil},
+		{"typo in where", db(true, config.TableConfig{Name: "public.two", Where: map[string]any{"nope": 1}}), `where column "nope"`, nil},
+		{"typo in fsm_column", db(true, config.TableConfig{Name: "public.two", FSMColumn: "nope"}), `fsm_column column "nope"`, nil},
+		{"typo in drop_columns", db(true, config.TableConfig{Name: "public.two", DropColumns: []string{"note", "nope"}}), `drop_columns column "nope"`, nil},
+		{"all missing columns are reported", db(true, config.TableConfig{Name: "public.two", OnChange: []string{"a1"}, DropColumns: []string{"b1"}}), `on_change column "a1" is not a column of public.two; drop_columns column "b1"`, nil},
+		{"existing columns pass", db(true, config.TableConfig{Name: "public.two", OnChange: []string{"note"}, FSMColumn: "note", DropColumns: []string{"email"}, Where: map[string]any{"id": 1}}), "", nil},
+		{"missing table without a key", db(true, config.TableConfig{Name: "public.gone", OnChange: []string{"a"}}), "public.gone", nil},
 		{"unlisted columns of a covering key", db(true, keyed("public.loose", nil, "id", "other")), "", nil},
 	}
 	for _, tt := range tests {
