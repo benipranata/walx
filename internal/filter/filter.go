@@ -22,6 +22,8 @@ type Chain struct {
 	logged map[[2]string]bool
 }
 
+var defaultOps = []event.Op{event.OpInsert, event.OpUpdate}
+
 // New builds a Chain from the config tables. With no tables every table
 // passes with the default ops; otherwise unlisted tables are dropped. A nil
 // metrics or log discards counts or log lines. name is the database name,
@@ -50,8 +52,6 @@ func New(name string, tables []config.TableConfig, m event.Metrics, log *slog.Lo
 	}
 	return c
 }
-
-var defaultOps = []event.Op{event.OpInsert, event.OpUpdate}
 
 // Apply returns b with the dropped events removed. When every event is
 // dropped the result is a Batch with zero events and the same LSNs, so the
