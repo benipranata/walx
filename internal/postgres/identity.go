@@ -18,6 +18,10 @@ import (
 // what the config needs from it.
 var ErrReplicaIdentity = errors.New("replica identity")
 
+// replicaIdentityLockTimeout bounds how long the automatic ALTER TABLE waits
+// for its ACCESS EXCLUSIVE lock; a variable so tests can shorten it.
+var replicaIdentityLockTimeout = "10s"
+
 // IdentityReport is the outcome of EnsureReplicaIdentity.
 type IdentityReport struct {
 	Altered  []string // tables set to REPLICA IDENTITY FULL, schema.table
@@ -64,6 +68,8 @@ func NewIdentityPolicy(db config.DatabaseConfig) *IdentityPolicy {
 		switch {
 		case t.FSMColumn != "":
 			r.needFull = fmt.Sprintf("fsm_column %q needs Before", t.FSMColumn)
+		case len(t.OnChange) > 0:
+			r.needFull = "on_change needs Before to compare columns on updates that keep the key"
 		case deletes && len(t.Where) > 0:
 			r.needFull = "where on deletes needs Before"
 		}
@@ -97,7 +103,7 @@ func (p *IdentityPolicy) CheckRelation(rel *pglogrepl.RelationMessage) (warn str
 	v := rule.assess(ti)
 	switch {
 	case v.needFull != "":
-		return "", fmt.Errorf("table %s: %w: %s; run %s or set it by hand", name, ErrReplicaIdentity, v.needFull, alterFullSQL(name))
+		return "", fmt.Errorf("table %s: %w: %s; run %s or set it by hand", name, ErrReplicaIdentity, v.needFull, alterStatements(name))
 	case v.broken != "" && listed:
 		return "", fmt.Errorf("table %s: %w: %s", name, ErrReplicaIdentity, v.broken)
 	case v.broken != "":
@@ -132,7 +138,7 @@ func (r identityRule) assess(ti tableIdentity) identityVerdict {
 }
 
 // EnsureReplicaIdentity checks the replica identity of every published table
-// of db. Tables that need Before, or whose custom key a delete would not
+// of db. Tables that need Before (fsm_column, on_change, where on deletes), or whose custom key a delete would not
 // carry, get REPLICA IDENTITY FULL when postgres.auto_replica_identity is
 // set (only those not already f, in one transaction); otherwise the ALTER
 // statements are reported in the error. A listed table with no key and no
@@ -176,7 +182,7 @@ func EnsureReplicaIdentity(ctx context.Context, pg *pgconn.PgConn, db config.Dat
 	if len(broken) > 0 {
 		msg := strings.Join(broken, "; ")
 		if len(fixes) > 0 && !db.Postgres.AutoReplicaIdentity {
-			msg += fmt.Sprintf(" (postgres.auto_replica_identity is false; run: %s)", alterFullSQL(fixes...))
+			msg += fmt.Sprintf(" (postgres.auto_replica_identity is false; run: %s)", alterStatements(fixes...))
 		}
 		return rep, fmt.Errorf("%w: %s", ErrReplicaIdentity, msg)
 	}
@@ -184,9 +190,14 @@ func EnsureReplicaIdentity(ctx context.Context, pg *pgconn.PgConn, db config.Dat
 		return rep, nil
 	}
 	if err := exec(ctx, pg, alterFullSQL(fixes...)); err != nil {
-		if pgCode(err) == codeInsufficientPrivilege {
+		switch pgCode(err) {
+		case codeInsufficientPrivilege:
 			return rep, fmt.Errorf("set REPLICA IDENTITY FULL on %s needs ownership: grant ownership of the tables to the walx role, "+
-				"or set postgres.auto_replica_identity: false and run by hand: %s: %w: %w", strings.Join(fixes, ", "), alterFullSQL(fixes...), ErrReplicaIdentity, err)
+				"or set postgres.auto_replica_identity: false and run by hand: %s: %w: %w", strings.Join(fixes, ", "), alterStatements(fixes...), ErrReplicaIdentity, err)
+		case codeLockNotAvailable:
+			return rep, fmt.Errorf("set REPLICA IDENTITY FULL on %s: another transaction holds a lock on the table (waited %s): "+
+				"retry later, or set postgres.auto_replica_identity: false and run by hand: %s: %w: %w",
+				strings.Join(fixes, ", "), replicaIdentityLockTimeout, alterStatements(fixes...), ErrReplicaIdentity, err)
 		}
 		return rep, fmt.Errorf("set REPLICA IDENTITY FULL on %s: %w", strings.Join(fixes, ", "), err)
 	}
@@ -249,8 +260,16 @@ func identityQuery(literals []string) string {
 }
 
 // alterFullSQL is one simple-protocol query, so the statements run in one
-// transaction and a failing one leaves every table unchanged.
+// implicit transaction and a failing one leaves every table unchanged. SET
+// LOCAL ends with that transaction, so the timeout never reaches later
+// queries on the connection.
 func alterFullSQL(names ...string) string {
+	return "SET LOCAL lock_timeout = " + quoteLiteral(replicaIdentityLockTimeout) + "; " + alterStatements(names...)
+}
+
+// alterStatements is the ALTER TABLE part of alterFullSQL, for messages a
+// person runs by hand.
+func alterStatements(names ...string) string {
 	stmts := make([]string, len(names))
 	for i, n := range names {
 		stmts[i] = "ALTER TABLE " + quoteTables([]string{n}) + " REPLICA IDENTITY FULL"

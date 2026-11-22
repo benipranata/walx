@@ -48,6 +48,10 @@ func TestReplicaIdentityIntegration(t *testing.T) {
 		return config.TableConfig{Name: name, Ops: []event.Op{event.OpUpdate, event.OpDelete}, Key: key}
 	}
 
+	onChange := func(name string) config.TableConfig {
+		return config.TableConfig{Name: name, OnChange: []string{"status"}}
+	}
+
 	tests := []struct {
 		name string
 		run  func(t *testing.T)
@@ -102,6 +106,49 @@ func TestReplicaIdentityIntegration(t *testing.T) {
 			rep, err = EnsureReplicaIdentity(ctx, c.PgConn(), cfg)
 			require.NoError(t, err)
 			require.Empty(t, rep.Altered)
+		}},
+		{name: "on_change gets full and the lock timeout does not leak", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE TABLE auto_onchange (id int primary key, status text)`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			rep, err := EnsureReplicaIdentity(ctx, c.PgConn(), db(true, onChange("public.auto_onchange")))
+			require.NoError(t, err)
+			require.Equal(t, []string{"public.auto_onchange"}, rep.Altered)
+			require.Equal(t, "f", ident(t, "auto_onchange"))
+			rows, err := query(ctx, c.PgConn(), `SHOW lock_timeout`)
+			require.NoError(t, err)
+			require.Equal(t, "0", str(rows[0][0]))
+		}},
+		{name: "on_change opt out fails", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE TABLE opt_onchange (id int primary key, status text)`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			_, err = EnsureReplicaIdentity(ctx, c.PgConn(), db(false, onChange("public.opt_onchange")))
+			require.ErrorIs(t, err, ErrReplicaIdentity)
+			require.ErrorContains(t, err, "on_change")
+			require.Equal(t, "d", ident(t, "opt_onchange"))
+		}},
+		{name: "lock held by another transaction fails fast", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE TABLE lock_fsm (id int primary key, status text)`)
+			require.NoError(t, err)
+			old := replicaIdentityLockTimeout
+			replicaIdentityLockTimeout = "300ms"
+			t.Cleanup(func() { replicaIdentityLockTimeout = old })
+			holder, err := pgx.Connect(ctx, url)
+			require.NoError(t, err)
+			defer holder.Close(ctx)
+			_, err = holder.Exec(ctx, `BEGIN; LOCK TABLE lock_fsm IN ACCESS SHARE MODE`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			start := time.Now()
+			lctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			_, err = EnsureReplicaIdentity(lctx, c.PgConn(), db(true, fsm("public.lock_fsm")))
+			require.ErrorIs(t, err, ErrReplicaIdentity)
+			require.ErrorContains(t, err, "another transaction holds a lock")
+			require.ErrorContains(t, err, "auto_replica_identity: false")
+			require.Less(t, time.Since(start), 5*time.Second)
+			require.Equal(t, "d", ident(t, "lock_fsm"))
 		}},
 		{name: "delete key inside identity is left alone", run: func(t *testing.T) {
 			c := connect(t, ctx, url)

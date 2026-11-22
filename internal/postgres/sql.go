@@ -11,6 +11,7 @@ import (
 // Postgres error codes walx reacts to.
 const (
 	codeInsufficientPrivilege = "42501"
+	codeLockNotAvailable      = "55P03"
 	codeUndefinedObject       = "42704"
 	codeDuplicateObject       = "42710"
 	codeObjectInUse           = "55006"

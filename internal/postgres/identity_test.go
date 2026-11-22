@@ -45,6 +45,10 @@ func TestIdentityPolicyCheckRelation(t *testing.T) {
 			rel: identityRel("t", 'd', "id"), wantErr: "fsm_column"},
 		{name: "fsm with full", tables: []config.TableConfig{{Name: "public.t", FSMColumn: "status"}},
 			rel: identityRel("t", 'f')},
+		{name: "on_change needs full", tables: []config.TableConfig{{Name: "public.t", OnChange: []string{"email"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "on_change"},
+		{name: "on_change with full", tables: []config.TableConfig{{Name: "public.t", OnChange: []string{"email"}}},
+			rel: identityRel("t", 'f')},
 		{name: "where on deletes needs full", tables: []config.TableConfig{
 			{Name: "public.t", Ops: []event.Op{del}, Where: map[string]any{"status": "x"}}},
 			rel: identityRel("t", 'd', "id"), wantErr: "where"},
@@ -112,6 +116,24 @@ func TestTxBufferIdentityCheck(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Len(t, warns, tt.warns)
+		})
+	}
+}
+
+func TestAlterFullSQL(t *testing.T) {
+	tests := []struct {
+		name   string
+		tables []string
+		want   string
+	}{
+		{name: "one", tables: []string{"public.a"},
+			want: `SET LOCAL lock_timeout = '10s'; ALTER TABLE "public"."a" REPLICA IDENTITY FULL`},
+		{name: "two", tables: []string{"public.a", "public.b"},
+			want: `SET LOCAL lock_timeout = '10s'; ALTER TABLE "public"."a" REPLICA IDENTITY FULL; ALTER TABLE "public"."b" REPLICA IDENTITY FULL`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, alterFullSQL(tt.tables...))
 		})
 	}
 }
