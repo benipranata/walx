@@ -16,6 +16,7 @@ func TestUnknownKeys(t *testing.T) {
 		{"database", mk("", "    on_permanent: stop\n"), "databases[0].on_permanent"},
 		{"postgres", mk("      urll: x\n", ""), "databases[0].postgres.urll"},
 		{"retry", mk("", "    retry:\n      attempts: 3\n"), "databases[0].retry.attempts"},
+		{"sink timeout typo", "databases:\n  - name: a\n    postgres: {url: \"postgres://u@h/db\"}\n    sink: {type: stdout, timeouts: 5s}\n", "databases[0].sink.timeouts"},
 		{"sink", "databases:\n  - name: a\n    postgres: {url: \"postgres://u@h/db\"}\n    sink: {type: stdout, file: x}\n", "databases[0].sink.file"},
 		{"table", mk("", "    tables:\n      - name: public.t\n        op: [insert]\n"), "databases[0].tables[0].op"},
 	}

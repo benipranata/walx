@@ -166,6 +166,9 @@ func validateSink(s SinkConfig, key func(string) string, bad reporter) {
 	if !slices.Contains(sinkTypes, s.Type) {
 		bad(key("sink.type"), "must be one of %s", strings.Join(sinkTypes, ", "))
 	}
+	if s.Timeout < 0 {
+		bad(key("sink.timeout"), "must not be negative")
+	}
 	if s.Type == "file" && s.Path == "" {
 		bad(key("sink.path"), "required for a file sink")
 	}

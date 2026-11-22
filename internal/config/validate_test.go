@@ -82,6 +82,7 @@ func TestValidationErrors(t *testing.T) {
 		{"retry max below initial", mk("", "    retry:\n      initial: 10s\n      max: 1s\n"), "databases[0].retry.max"},
 		{"negative max_attempts", mk("", "    retry:\n      max_attempts: -1\n"), "databases[0].retry.max_attempts"},
 		{"unknown on_permanent_error", mk("", "    on_permanent_error: ignore\n"), "databases[0].on_permanent_error"},
+		{"negative sink timeout", "databases:\n  - name: a\n    postgres: {url: \"postgres://u@h/a\"}\n    sink: {type: stdout, timeout: -1s}\n", "databases[0].sink.timeout"},
 		{"zero shutdown_timeout", "shutdown_timeout: 0s\n" + mk("", ""), "shutdown_timeout"},
 		{"negative shutdown_timeout", "shutdown_timeout: -5s\n" + mk("", ""), "shutdown_timeout"},
 	}

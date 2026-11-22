@@ -24,6 +24,7 @@ func TestParse(t *testing.T) {
 			doc:  mk("", ""),
 			check: func(t *testing.T, cfg *config.Config) {
 				require.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+				require.Zero(t, cfg.Databases[0].Sink.Timeout, "no sink timeout by default")
 				require.Len(t, cfg.Databases, 1)
 				d := cfg.Databases[0]
 				require.Equal(t, "a", d.Name)
@@ -85,6 +86,7 @@ databases:
     sink:
       type: file
       path: ./a.jsonl
+      timeout: 45s
     retry:
       policy: max_attempts
       initial: 1s
@@ -95,6 +97,7 @@ databases:
 			check: func(t *testing.T, cfg *config.Config) {
 				require.Equal(t, 5*time.Second, cfg.ShutdownTimeout)
 				d := cfg.Databases[0]
+				require.Equal(t, 45*time.Second, d.Sink.Timeout)
 				require.Equal(t, "s", d.Postgres.Slot)
 				require.Equal(t, "p", d.Postgres.Publication)
 				require.False(t, d.Postgres.AutoCreate)
@@ -111,7 +114,7 @@ databases:
 					Key:           []string{"id"},
 					ReferenceOnly: true,
 				}}, d.Tables)
-				require.Equal(t, config.SinkConfig{Type: "file", Path: "./a.jsonl"}, d.Sink)
+				require.Equal(t, config.SinkConfig{Type: "file", Path: "./a.jsonl", Timeout: 45 * time.Second}, d.Sink)
 				require.Equal(t, config.RetryConfig{
 					Policy: "max_attempts", Initial: time.Second, Max: time.Minute, MaxAttempts: 5,
 				}, d.Retry)
