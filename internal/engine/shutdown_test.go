@@ -153,6 +153,34 @@ func TestShutdown(t *testing.T) {
 			require.Equal(t, []pglogrepl.LSN{10}, src.Confirmed())
 			require.EqualValues(t, 1, sink.closed.Load())
 		}},
+		{name: "source error first, then a stuck sink and blocking Close, still returns", run: func(t *testing.T) {
+			src := newFakeSource()
+			entered := make(chan struct{})
+			release := make(chan struct{})
+			closeEntered := make(chan struct{})
+			sink := &blockCloseSink{
+				closeSink:    closeSink{send: func(context.Context, event.Batch) error { close(entered); <-release; return nil }},
+				closeEntered: closeEntered,
+				closeRelease: release,
+			}
+			e := New(Config{Name: "a", Source: src, Sink: sink, ShutdownTimeout: time.Second})
+			stubDecode(e)
+			fire := make(chan time.Time)
+			var armed atomic.Bool
+			e.timer = func(time.Duration) (<-chan time.Time, func()) {
+				armed.Store(true)
+				return fire, func() {}
+			}
+			done := runEngine(context.Background(), e)
+			feed(context.Background(), src, 1)
+			<-entered
+			boom := errors.New("stream broke")
+			src.runErr <- boom
+			require.Eventually(t, armed.Load, 5*time.Second, time.Millisecond)
+			fire <- time.Time{}
+			require.ErrorIs(t, wait(t, done), boom)
+			close(release)
+		}},
 		{name: "default shutdown timeout", run: func(t *testing.T) {
 			require.Equal(t, 30*time.Second, New(Config{Source: newFakeSource(), Sink: event.SinkFunc(nil)}).shutdownTimeout())
 		}},
@@ -184,3 +212,16 @@ type errCloser struct{}
 func (errCloser) Send(context.Context, event.Batch) error { return nil }
 
 func (errCloser) Close() error { return errors.New("close boom") }
+
+// blockCloseSink blocks Close until closeRelease is closed.
+type blockCloseSink struct {
+	closeSink
+	closeEntered chan struct{}
+	closeRelease chan struct{}
+}
+
+func (s *blockCloseSink) Close() error {
+	close(s.closeEntered)
+	<-s.closeRelease
+	return nil
+}

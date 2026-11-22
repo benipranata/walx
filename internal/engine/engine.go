@@ -60,6 +60,8 @@ type Engine struct {
 
 	pending atomic.Int64 // batches queued or being delivered
 
+	timedOut atomic.Bool // the shutdown timeout fired on an in-flight sink call
+
 	stop   context.Context                                  // the Run context; ends retry waits, nil outside Run
 	sleep  func(ctx context.Context, d time.Duration) error // retry wait, a fake clock in tests
 	timer  func(d time.Duration) (<-chan time.Time, func()) // shutdown deadline, a fake in tests
@@ -136,7 +138,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		}
 	}()
 	wg.Wait()
-	e.closeSink(first)
+	e.closeSink()
 
 	if first == nil {
 		first = ctx.Err()

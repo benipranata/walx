@@ -39,6 +39,7 @@ func (e *Engine) sendInFlight(ctx context.Context, b event.Batch) error {
 	case err := <-res:
 		return err
 	case <-expired:
+		e.timedOut.Store(true)
 		return fmt.Errorf("%w (after %s)", ErrShutdownTimeout, e.shutdownTimeout())
 	}
 }
@@ -66,14 +67,15 @@ func (e *Engine) waitCtx(ctx context.Context) (context.Context, func()) {
 
 // closeSink closes the sink after the in-flight call is done. After a
 // shutdown timeout the call may still be stuck and Close may block too, so it
-// runs unawaited then.
-func (e *Engine) closeSink(runErr error) {
+// runs unawaited then. The flag is separate from the returned error because
+// Run keeps only the first error, which may not be the timeout.
+func (e *Engine) closeSink() {
 	closeIt := func() {
 		if err := e.cfg.Sink.Close(); err != nil {
 			e.log.Error("sink close failed", "err", err)
 		}
 	}
-	if errors.Is(runErr, ErrShutdownTimeout) {
+	if e.timedOut.Load() {
 		go closeIt()
 		return
 	}
