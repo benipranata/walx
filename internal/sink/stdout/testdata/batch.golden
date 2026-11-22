@@ -1,0 +1,3 @@
+{"id":"orders-0/16B3748-1","source":"orders","op":"insert","schema":"public","table":"t","after":{"id":1,"name":"a<b>&"},"key":{"id":1},"lsn":"0/16B3748","tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"}
+{"id":"orders-0/16B3748-2","source":"orders","op":"update","schema":"public","table":"t","before":{"doc":"x","id":1},"after":{"doc":{"$unchanged":true},"id":1},"key":{"id":1},"lsn":"0/16B3748","tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"}
+{"id":"orders-0/16B3748-3","source":"orders","op":"delete","schema":"public","table":"t","before":{"id":1},"key":{"id":1},"lsn":"0/16B3748","tx_id":7,"commit_ts":"2026-01-02T03:04:05Z"}

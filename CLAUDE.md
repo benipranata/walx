@@ -55,6 +55,7 @@ Status: M1 to M4 and T5.1 (sink registry and contract suite) are implemented: co
 - Postgres: `CheckWALRetention` returns warnings (`max_slot_wal_keep_size` = -1, `idle_replication_slot_timeout` = 0; a setting missing on the server is skipped), read from `pg_settings`. The caller must log them at startup; wiring is pending (T6.2). Its integration test changes both through `setServerSetting`.
 - Postgres: `CheckKeys` (startup, T4.6) fails with `ErrKey` on a missing table or key column and warns when no usable unique index has all its key columns (not INCLUDE columns) inside the key; usable means valid, no predicate or expression, and primary, NULLS NOT DISTINCT or all columns NOT NULL (NULLs do not enforce uniqueness). The uncovered-identity check for delete-enabled tables is `EnsureReplicaIdentity`, not repeated there.
 - Filter: `reference_only` runs last in `Chain.Apply` (`filter/key.go`): Before and After are nil, Key stays, and After holds only the `fsm_column` value (After, else Before when Unchanged; none on a delete).
+- Sink: `internal/sink/stdout` takes an `io.Writer` (`New`; `Factory` writes `os.Stdout`) and never closes it. `Send` encodes the whole batch first (an unencodable event, e.g. NaN, is `Permanent` with nothing written), then does one `Write`; a write error is plain and retried, so a partial write can repeat lines (dedupe by `Event.ID`). HTML escaping is off. Golden output lives in `testdata/*.golden` (goldie; refresh with `-update`).
 
 ## Commands
 
