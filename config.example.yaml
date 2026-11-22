@@ -35,6 +35,8 @@ databases:
         on_change: [status, total_cents] # updates pass only when one of these columns changed
         drop_columns: [internal_notes]   # removed from Before and After, never from the key
         key: [order_number]      # default: the primary key
+        # publication_where: "region = 'eu'"  # Postgres row filter (optimization); rewrites ops (an update that leaves it arrives as delete); needs REPLICA IDENTITY FULL, set automatically
+        # publication_columns: [order_number, status, total_cents, region] # Postgres column list; must hold key, fsm_column, where and on_change columns
       - name: public.audit_log   # defaults: ops [insert, update], primary key as key
         reference_only: true     # no Before or After; only the key (and the fsm_column value)
     sink:

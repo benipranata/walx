@@ -64,6 +64,30 @@ func TestIdentityPolicyCheckRelation(t *testing.T) {
 		{name: "key outside identity without deletes", tables: []config.TableConfig{
 			{Name: "public.t", Ops: []event.Op{ins, upd}, Key: []string{"email"}}},
 			rel: identityRel("t", 'd', "id")},
+		{name: "publication_where on updates needs full", tables: []config.TableConfig{
+			{Name: "public.t", PublicationWhere: "status = 'x'"}},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_where"},
+		{name: "publication_where on deletes needs full", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins, del}, PublicationWhere: "status = 'x'"}},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_where"},
+		{name: "publication_where with full", tables: []config.TableConfig{
+			{Name: "public.t", PublicationWhere: "status = 'x'"}},
+			rel: identityRel("t", 'f')},
+		{name: "publication_where on inserts only needs nothing", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins}, PublicationWhere: "status = 'x'"}},
+			rel: identityRel("t", 'n')},
+		{name: "column list with update cannot take full", tables: []config.TableConfig{
+			{Name: "public.t", FSMColumn: "status", PublicationColumns: []string{"id", "status"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_columns"},
+		{name: "column list with update and default identity", tables: []config.TableConfig{
+			{Name: "public.t", PublicationColumns: []string{"id"}}},
+			rel: identityRel("t", 'd', "id")},
+		{name: "column list with update and identity already full", tables: []config.TableConfig{
+			{Name: "public.t", PublicationColumns: []string{"id"}}},
+			rel: identityRel("t", 'f'), wantErr: "publication_columns"},
+		{name: "column list on inserts may take full", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins}, FSMColumn: "status", PublicationColumns: []string{"id", "status"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "fsm_column"},
 		{name: "unlisted table under all tables only warns", rel: identityRel("t", 'n'),
 			wantWarn: "UPDATE and DELETE fail"},
 		{name: "unlisted table with key", rel: identityRel("t", 'd', "id")},

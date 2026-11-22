@@ -133,7 +133,7 @@ func TestPublicationIntegration(t *testing.T) {
 			err = EnsurePublication(ctx, c.PgConn(), cfg)
 			require.ErrorIs(t, err, ErrPublicationDrift)
 			require.ErrorContains(t, err, "public.f")
-			require.ErrorContains(t, err, "row filter or column list")
+			require.ErrorContains(t, err, "row filter on public.f")
 
 			cfg.Postgres.AutoAlter = true
 			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))

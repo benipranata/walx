@@ -30,8 +30,9 @@ var (
 	// A name is embedded in Event.ID and the default slot and publication
 	// (walx_<name>), so it is limited to 58 characters to fit 63, and to
 	// what a slot name allows, minus upper case.
-	namePattern = regexp.MustCompile(`^[a-z][a-z0-9_]{0,57}$`)
-	slotPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	namePattern  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,57}$`)
+	slotPattern  = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
+	identPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$]{0,62}$`)
 )
 
 type reporter func(key, format string, args ...any)
@@ -251,8 +252,49 @@ func validateTable(t TableConfig, key func(string) string, bad reporter) {
 	if _, ok := t.Where[""]; ok {
 		bad(key("where"), "column name must not be empty")
 	}
+	validatePublicationFilters(t, key, bad)
 	if i := slices.Index(t.DropColumns, t.FSMColumn); t.FSMColumn != "" && i >= 0 {
 		bad(key(fmt.Sprintf("drop_columns[%d]", i)), "must not drop the fsm_column %q", t.FSMColumn)
+	}
+}
+
+func validatePublicationFilters(t TableConfig, key func(string) string, bad reporter) {
+	if t.PublicationWhere != "" && strings.TrimSpace(t.PublicationWhere) == "" {
+		bad(key("publication_where"), "must not be blank; omit it for no row filter")
+	}
+	if strings.Contains(t.PublicationWhere, ";") {
+		bad(key("publication_where"), "must be one expression and must not contain ';'")
+	}
+	if t.PublicationColumns == nil {
+		return
+	}
+	if len(t.PublicationColumns) == 0 {
+		bad(key("publication_columns"), "must not be empty; omit it to publish every column")
+		return
+	}
+	for i, c := range t.PublicationColumns {
+		switch {
+		case !identPattern.MatchString(c):
+			bad(key(fmt.Sprintf("publication_columns[%d]", i)), "must be a column name (letters, digits, _ and $, at most %d characters), got %q", maxIdentLen, c)
+		case slices.Contains(t.PublicationColumns[:i], c):
+			bad(key(fmt.Sprintf("publication_columns[%d]", i)), "duplicate column %q", c)
+		}
+	}
+	// The filters read these columns from After, so the column list must carry them.
+	required := []struct{ what, col string }{{"fsm_column", t.FSMColumn}}
+	for _, c := range t.Key {
+		required = append(required, struct{ what, col string }{"key column", c})
+	}
+	for _, c := range slices.Sorted(maps.Keys(t.Where)) {
+		required = append(required, struct{ what, col string }{"where column", c})
+	}
+	for _, c := range t.OnChange {
+		required = append(required, struct{ what, col string }{"on_change column", c})
+	}
+	for _, r := range required {
+		if r.col != "" && !slices.Contains(t.PublicationColumns, r.col) {
+			bad(key("publication_columns"), "must include %s %q", r.what, r.col)
+		}
 	}
 }
 

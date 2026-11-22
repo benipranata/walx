@@ -63,6 +63,10 @@ Under the default replica identity `before` is absent for updates, and a delete 
 
 Large values (TOAST) that an update does not rewrite are not in the WAL. Such a column is `{"$unchanged": true}` in `after` and means "keep the old value", not NULL. Under `REPLICA IDENTITY FULL` the old tuple carries the full value, so `before` holds the value and `after` the marker. Under the default identity there is no `before`, so the value is unknown to the stream.
 
+## Publication row filters rewrite ops
+
+With `publication_where` on a table, Postgres evaluates the filter on the row and rewrites the op: an update that moves a row out of the filter arrives as a `delete` (its `before` is the old row), one that moves a row into the filter arrives as an `insert`, and an update inside it stays an `update`. Rows that never match produce nothing. The table must therefore list `delete` (and `insert`) in `ops` to see these events; otherwise the walx filter drops them. A rewritten `delete` does not mean the row was deleted at the source. `seq` in `Event.ID` counts what Postgres sends, so changing the filter changes the IDs of a transaction that is redelivered afterwards. Use the filter as an optimization and keep `where` for the semantics you rely on.
+
 ## Type mapping
 
 The decoder reads the text output of the walsender, and the connection pins `datestyle=ISO`, `bytea_output=hex`, `extra_float_digits=1` and `intervalstyle=iso_8601` so the output does not depend on database defaults.

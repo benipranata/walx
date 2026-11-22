@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -33,6 +34,7 @@ type pubSpec struct {
 	AllTables bool
 	Tables    []string // sorted, schema.table
 	Ops       []event.Op
+	Filters   map[string]tableFilter // by table; only tables with a row filter or column list
 }
 
 type pubState struct {
@@ -40,7 +42,7 @@ type pubState struct {
 	Insert, Update, Delete, Truncate bool
 	ViaRoot                          bool
 	Tables                           []string
-	Filtered                         []string // tables with a row filter or column list
+	Filters                          map[string]tableFilter // tables with a row filter or column list
 }
 
 // PublishOps returns the union of ops across tables in Postgres order. It is
@@ -72,9 +74,10 @@ func PublishOps(tables []config.TableConfig) []event.Op {
 // postgres.auto_create is set, and checks it against the config otherwise.
 // It is FOR ALL TABLES when db lists no tables, else FOR TABLE with the
 // listed ones, always with publish_via_partition_root and the union of table
-// ops. On drift it fails with ErrPublicationDrift, unless postgres.auto_alter
-// is set, in which case it runs ALTER PUBLICATION. Switching between FOR ALL
-// TABLES and a table list cannot be altered and always fails.
+// ops, with each table's publication_where and publication_columns. On drift
+// it fails with ErrPublicationDrift, unless postgres.auto_alter is set, in
+// which case it runs ALTER PUBLICATION. Switching between FOR ALL TABLES and a
+// table list cannot be altered and always fails.
 func EnsurePublication(ctx context.Context, pg *pgconn.PgConn, db config.DatabaseConfig) error {
 	spec := newPubSpec(db)
 	rows, err := query(ctx, pg, pubQuery(spec.Name))
@@ -121,9 +124,10 @@ func EnsurePublication(ctx context.Context, pg *pgconn.PgConn, db config.Databas
 		if err != nil {
 			return fmt.Errorf("read filters of publication %q: %w", spec.Name, err)
 		}
-		for _, r := range frows {
-			got.Filtered = append(got.Filtered, str(r[0]))
+		if got.Filters, err = parseFilters(frows); err != nil {
+			return fmt.Errorf("read filters of publication %q: %w", spec.Name, err)
 		}
+		spec = spec.canonicalizeFilters(ctx, pg, got)
 	}
 	problems, fixes, fixable := spec.drift(got)
 	if len(problems) == 0 {
@@ -148,6 +152,12 @@ func newPubSpec(db config.DatabaseConfig) pubSpec {
 	spec := pubSpec{Name: db.Postgres.Publication, AllTables: len(db.Tables) == 0, Ops: PublishOps(db.Tables)}
 	for _, t := range db.Tables {
 		spec.Tables = append(spec.Tables, t.Name)
+		if f := newTableFilter(t); !f.isZero() {
+			if spec.Filters == nil {
+				spec.Filters = map[string]tableFilter{}
+			}
+			spec.Filters[t.Name] = f
+		}
 	}
 	slices.Sort(spec.Tables)
 	spec.Tables = slices.Compact(spec.Tables)
@@ -157,7 +167,7 @@ func newPubSpec(db config.DatabaseConfig) pubSpec {
 func (s pubSpec) createSQL() string {
 	target := "ALL TABLES"
 	if !s.AllTables {
-		target = "TABLE " + quoteTables(s.Tables)
+		target = "TABLE " + s.tableList()
 	}
 	return fmt.Sprintf("CREATE PUBLICATION %s FOR %s WITH (%s)", pgx.Identifier{s.Name}.Sanitize(), target, s.options())
 }
@@ -203,13 +213,20 @@ func (s pubSpec) drift(got pubState) (problems, fixes []string, fixable bool) {
 			strings.Join(got.Tables, ", "), strings.Join(s.Tables, ", ")))
 		setTable = true
 	}
-	// A hand-added filter silently drops events, and SET TABLE resets it.
-	if len(got.Filtered) > 0 {
-		problems = append(problems, "row filter or column list on "+strings.Join(got.Filtered, ", "))
-		setTable = true
+	// A filter that is not configured silently drops events, and SET TABLE resets it.
+	if !s.AllTables {
+		names := slices.Sorted(maps.Keys(s.Filters))
+		names = append(names, slices.Collect(maps.Keys(got.Filters))...)
+		slices.Sort(names)
+		for _, n := range slices.Compact(names) {
+			if p := filterProblems(n, s.Filters[n], got.Filters[n]); len(p) > 0 {
+				problems = append(problems, p...)
+				setTable = true
+			}
+		}
 	}
 	if setTable {
-		fixes = append(fixes, fmt.Sprintf("ALTER PUBLICATION %s SET TABLE %s", pgx.Identifier{s.Name}.Sanitize(), quoteTables(s.Tables)))
+		fixes = append(fixes, fmt.Sprintf("ALTER PUBLICATION %s SET TABLE %s", pgx.Identifier{s.Name}.Sanitize(), s.tableList()))
 	}
 	return problems, fixes, true
 }
@@ -235,7 +252,9 @@ func pubTablesQuery(name string) string {
 }
 
 func pubFilteredQuery(name string) string {
-	return "SELECT n.nspname || '.' || c.relname FROM pg_publication_rel r " +
+	return "SELECT n.nspname || '.' || c.relname, coalesce(pg_get_expr(r.prqual, r.prrelid), ''), " +
+		"coalesce((SELECT string_agg(a.attname::text, chr(31) ORDER BY a.attname) FROM pg_attribute a " +
+		"WHERE a.attrelid = r.prrelid AND a.attnum = ANY(r.prattrs)), '') FROM pg_publication_rel r " +
 		"JOIN pg_publication p ON p.oid = r.prpubid JOIN pg_class c ON c.oid = r.prrelid " +
 		"JOIN pg_namespace n ON n.oid = c.relnamespace " +
 		"WHERE p.pubname = " + quoteLiteral(name) + " AND (r.prqual IS NOT NULL OR r.prattrs IS NOT NULL) ORDER BY 1"

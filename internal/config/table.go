@@ -19,4 +19,7 @@ type TableConfig struct {
 	OnChange      []string       `yaml:"on_change"`      // updates pass only when one of these columns changed
 	Key           []string       `yaml:"key"`            // key columns; default: the primary key
 	ReferenceOnly bool           `yaml:"reference_only"` // omit Before and After, keep Key (and fsm_column in After)
+
+	PublicationWhere   string   `yaml:"publication_where"`   // SQL boolean expression of the publication row filter
+	PublicationColumns []string `yaml:"publication_columns"` // publication column list
 }

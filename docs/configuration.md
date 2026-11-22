@@ -53,7 +53,7 @@ Bool, default `true`. Create the slot and publication when missing. `false` is v
 Bool, default `true`. Run `ALTER TABLE ... REPLICA IDENTITY FULL` for listed tables whose config needs the old row. `false` is validate-only and the error prints the statements.
 
 ### `databases[].postgres.auto_alter`
-Bool, default `false`. Run `ALTER PUBLICATION` when the publication differs from the config (tables, ops, `publish_via_partition_root`, a row filter or column list). Without it drift is a startup error. Never switches between `FOR ALL TABLES` and a table list.
+Bool, default `false`. Run `ALTER PUBLICATION` when the publication differs from the config (tables, ops, `publish_via_partition_root`, a row filter or column list that differs from `publication_where` and `publication_columns`). Without it drift is a startup error. Never switches between `FOR ALL TABLES` and a table list.
 
 ### `databases[].postgres.max_tx_bytes`
 Size, default `256MiB`, must be positive. Cap on the raw tuple bytes of one buffered transaction. It is not a memory limit (decoded values use more). Exceeding it stops the pipeline with a non-retryable error; a restart reads the same transaction again, so raise the limit.
@@ -87,6 +87,12 @@ List of columns forming `Event.Key`. Default: the primary key. Blank or duplicat
 
 ### `databases[].tables[].reference_only`
 Bool, default `false`. Emit events without `Before` and `After`: only the key (and the `fsm_column` value in `After`) stays, so the consumer looks up the current row. Runs last, after `where`, `on_change` and `drop_columns`. A reference event has no `Before`, so no from-state; keep full events on tables that need transitions.
+
+### `databases[].tables[].publication_where`
+Optional SQL boolean expression, passed as the table's publication row filter (`FOR TABLE t WHERE (expr)`, Postgres 15+). Postgres then drops non-matching rows before walx sees them, which saves bandwidth; it is an optimization on top of `where`, not a replacement. Must not be blank or contain `;`; walx does not parse it, Postgres rejects an invalid one at startup. The expression may only use what Postgres allows in a row filter (no user functions, no system columns). **The filter rewrites ops:** an update that moves a row out of the filter arrives as a `delete`, one that moves it in arrives as an `insert` (see [events](events.md#publication-row-filters-rewrite-ops)). A table with `publication_where` that publishes `update` or `delete` needs `REPLICA IDENTITY FULL` (set automatically, since Postgres fails those statements on the source otherwise), so `delete` events carry the full old row. A hand-added filter that differs from this value is drift; walx compares the expression as Postgres prints it. See also `databases[].postgres.auto_alter`.
+
+### `databases[].tables[].publication_columns`
+Optional list of columns for the publication column list (`FOR TABLE t (a, b)`, Postgres 15+); other columns never reach walx. Must not be empty, hold duplicates or invalid identifiers, and must include the `key` columns, the `fsm_column`, the `where` columns and the `on_change` columns (the default primary key is not checked here: Postgres rejects updates and deletes when the column list misses the replica identity). Postgres also requires a column list to cover the replica identity of a table that publishes `update` or `delete`, so `REPLICA IDENTITY FULL` (needed by `fsm_column`, `on_change`, `publication_where` and `where` on deletes) (also when the table already has it) cannot be combined with a column list there; walx reports this at startup and does not alter the table. A column list that differs from the live publication is drift.
 
 ### `databases[].sink`
 The one sink of the entry. See [sinks](sinks.md).

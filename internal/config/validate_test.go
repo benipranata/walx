@@ -79,6 +79,16 @@ func TestValidationErrors(t *testing.T) {
 		{"map where value", mk("", "    tables:\n      - name: public.t\n        where: {status: {a: 1}}\n"), "databases[0].tables[0].where.status"},
 		{"list where value", mk("", "    tables:\n      - name: public.t\n        where: {status: [a, b]}\n"), "databases[0].tables[0].where.status"},
 		{"duplicate op in a table", mk("", "    tables:\n      - name: public.t\n        ops: [insert, update, insert]\n"), "databases[0].tables[0].ops[2]"},
+		{"blank publication_where", mk("", "    tables:\n      - name: public.t\n        publication_where: \"  \"\n"), "databases[0].tables[0].publication_where"},
+		{"publication_where with semicolon", mk("", "    tables:\n      - name: public.t\n        publication_where: \"id > 0; DROP TABLE x\"\n"), "databases[0].tables[0].publication_where"},
+		{"empty publication_columns", mk("", "    tables:\n      - name: public.t\n        publication_columns: []\n"), "databases[0].tables[0].publication_columns"},
+		{"blank publication_columns entry", mk("", "    tables:\n      - name: public.t\n        publication_columns: [id, \"\"]\n"), "databases[0].tables[0].publication_columns[1]"},
+		{"invalid publication_columns identifier", mk("", "    tables:\n      - name: public.t\n        publication_columns: [id, \"a b\"]\n"), "databases[0].tables[0].publication_columns[1]"},
+		{"duplicate publication_columns entry", mk("", "    tables:\n      - name: public.t\n        publication_columns: [id, id]\n"), "databases[0].tables[0].publication_columns[1]"},
+		{"publication_columns without key", mk("", "    tables:\n      - name: public.t\n        key: [id]\n        publication_columns: [name]\n"), "must include key column \"id\""},
+		{"publication_columns without fsm_column", mk("", "    tables:\n      - name: public.t\n        fsm_column: status\n        publication_columns: [id]\n"), "must include fsm_column \"status\""},
+		{"publication_columns without where column", mk("", "    tables:\n      - name: public.t\n        where: {region: eu}\n        publication_columns: [id]\n"), "must include where column \"region\""},
+		{"publication_columns without on_change column", mk("", "    tables:\n      - name: public.t\n        on_change: [total]\n        publication_columns: [id]\n"), "must include on_change column \"total\""},
 		{"unix socket same slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n" +
 			"  - {name: b, postgres: {url: \"postgres:///e?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n", "databases[1].postgres.slot"},
@@ -198,6 +208,29 @@ func TestWhereAllowsNullAndScalars(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			_, err := config.Parse([]byte(mk("", "    tables:\n      - name: public.t\n        where: "+tt.where+"\n")))
 			require.NoError(t, err)
+		})
+	}
+}
+
+func TestPublicationFilterFields(t *testing.T) {
+	tests := []struct {
+		name        string
+		table       string
+		wantWhere   string
+		wantColumns []string
+	}{
+		{name: "unset", table: "      - name: public.t\n"},
+		{
+			name: "both set", wantWhere: "region = 'eu' AND id > 0", wantColumns: []string{"id", "region", "Status"},
+			table: "      - name: public.t\n        key: [id]\n        where: {region: eu}\n        fsm_column: Status\n" +
+				"        publication_where: \"region = 'eu' AND id > 0\"\n        publication_columns: [id, region, Status]\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := mustParse(t, mk("", "    tables:\n"+tt.table))
+			require.Equal(t, tt.wantWhere, cfg.Databases[0].Tables[0].PublicationWhere)
+			require.Equal(t, tt.wantColumns, cfg.Databases[0].Tables[0].PublicationColumns)
 		})
 	}
 }

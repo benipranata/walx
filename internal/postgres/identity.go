@@ -40,6 +40,7 @@ type identityRule struct {
 	needFull  string   // why Before is needed, empty when it is not
 	needKey   bool     // updates or deletes are published
 	deleteKey []string // custom key of a delete-enabled table
+	colList   bool     // publication_columns on a table that publishes updates or deletes
 }
 
 // tableIdentity is the replica identity of one table: the flag and the
@@ -65,7 +66,10 @@ func NewIdentityPolicy(db config.DatabaseConfig) *IdentityPolicy {
 		}
 		r := identityRule{needKey: slices.Contains(ops, event.OpUpdate) || slices.Contains(ops, event.OpDelete)}
 		deletes := slices.Contains(ops, event.OpDelete)
+		r.colList = r.needKey && len(t.PublicationColumns) > 0
 		switch {
+		case t.PublicationWhere != "" && r.needKey:
+			r.needFull = "publication_where needs the filter columns in the replica identity"
 		case t.FSMColumn != "":
 			r.needFull = fmt.Sprintf("fsm_column %q needs Before", t.FSMColumn)
 		case len(t.OnChange) > 0:
@@ -114,6 +118,9 @@ func (p *IdentityPolicy) CheckRelation(rel *pglogrepl.RelationMessage) (warn str
 
 func (r identityRule) assess(ti tableIdentity) identityVerdict {
 	if ti.flag == 'f' {
+		if r.colList {
+			return identityVerdict{broken: "REPLICA IDENTITY FULL cannot be combined with publication_columns on a table that publishes updates or deletes (the column list must cover the identity, which FULL makes every column)"}
+		}
 		return identityVerdict{}
 	}
 	reason := r.needFull
@@ -127,6 +134,10 @@ func (r identityRule) assess(ti tableIdentity) identityVerdict {
 		if len(outside) > 0 {
 			reason = fmt.Sprintf("key columns %s are outside the replica identity (%s) and deletes only carry that", strings.Join(outside, ", "), identityName(ti.flag))
 		}
+	}
+	if reason != "" && r.colList {
+		// Postgres wants the column list to cover the identity, which FULL makes every column.
+		return identityVerdict{broken: reason + ", but REPLICA IDENTITY FULL cannot be combined with publication_columns on a table that publishes updates or deletes"}
 	}
 	if reason != "" {
 		return identityVerdict{needFull: reason}
