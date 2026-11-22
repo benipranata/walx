@@ -43,7 +43,7 @@ databases:
       type: nats                 # stdout | file | nats
       url: nats://nats-1:4222,nats://nats-2:4222   # nats only; comma-separated list allowed
       subject: cdc.{database}.{schema}.{table}.{token} # nats only; default cdc.{schema}.{table}.{token}
-      timeout: 10s               # default 0 (no deadline): bound of one Send call
+      timeout: 10s               # default 60s; 0s = no deadline: bound of one Send attempt
     retry:
       policy: max_attempts       # default forever; also max_attempts, stop
       initial: 100ms             # default 100ms

@@ -26,7 +26,7 @@ func TestParse(t *testing.T) {
 				require.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
 				require.Empty(t, cfg.Metrics.Listen, "metrics listener is opt-in")
 				require.Equal(t, 15*time.Second, cfg.Metrics.LagInterval)
-				require.Zero(t, cfg.Databases[0].Sink.Timeout, "no sink timeout by default")
+				require.Equal(t, 60*time.Second, cfg.Databases[0].Sink.Timeout, "sink timeout default")
 				require.Len(t, cfg.Databases, 1)
 				d := cfg.Databases[0]
 				require.Equal(t, "a", d.Name)
@@ -127,6 +127,13 @@ databases:
 					Policy: "max_attempts", Initial: time.Second, Max: time.Minute, MaxAttempts: 5,
 				}, d.Retry)
 				require.Equal(t, "skip", d.OnPermanentError)
+			},
+		},
+		{
+			name: "explicit zero sink timeout disables the deadline",
+			doc:  mk("", "      timeout: 0s\n"),
+			check: func(t *testing.T, cfg *config.Config) {
+				require.Zero(t, cfg.Databases[0].Sink.Timeout)
 			},
 		},
 		{

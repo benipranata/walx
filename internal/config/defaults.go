@@ -9,6 +9,7 @@ import (
 const (
 	defaultShutdownTimeout = 30 * time.Second
 	defaultLagInterval     = 15 * time.Second
+	defaultSinkTimeout     = 60 * time.Second
 )
 
 // newDatabase returns an entry holding every default that does not depend on
@@ -25,6 +26,7 @@ func newDatabase() DatabaseConfig {
 			Initial: 100 * time.Millisecond,
 			Max:     30 * time.Second,
 		},
+		Sink:             SinkConfig{Timeout: defaultSinkTimeout},
 		OnPermanentError: "stop",
 	}
 }

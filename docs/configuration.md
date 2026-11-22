@@ -110,7 +110,7 @@ NATS sink only, required there: a server URL or a comma-separated list. Schemes 
 NATS sink only. Subject template; default `cdc.{schema}.{table}.{token}`. Placeholders `{database}`, `{schema}`, `{table}`, `{token}`; dot-separated tokens; literals must not hold whitespace, `*` or `>`.
 
 ### `databases[].sink.timeout`
-Duration, default `0` (no deadline), must not be negative. Bounds each `Send` attempt. A timed-out call is retried, so a late success becomes a duplicate (dedupe by `Event.ID`). It still applies during shutdown. A sink that ignores its context is not bounded by it.
+Duration, default `60s`, must not be negative; `0s` disables the deadline (a bare `0` is not a duration). Bounds each `Send` attempt, so a hung destination returns an error and is retried instead of blocking the pipeline forever. A timed-out call is retried, so a late success becomes a duplicate (dedupe by `Event.ID`). It still applies during shutdown. A sink that ignores its context is not bounded by it.
 
 ### `databases[].retry`
 How a failed batch is retried. See [operations](operations.md#retry-and-errors).

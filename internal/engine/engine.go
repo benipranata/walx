@@ -65,8 +65,9 @@ type Config struct {
 	// sink call; 30s when <= 0.
 	ShutdownTimeout time.Duration
 
-	// SinkTimeout bounds each Send attempt; 0 = no timeout. An attempt that
-	// hits it fails with context.DeadlineExceeded, an ordinary retryable error.
+	// SinkTimeout bounds each Send attempt; 0 = no timeout (config defaults
+	// to 60s). An attempt that hits it fails with context.DeadlineExceeded,
+	// an ordinary retryable error.
 	SinkTimeout time.Duration
 }
 

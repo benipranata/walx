@@ -36,7 +36,7 @@ Requirements and behaviour:
 
 - The stream must already exist and capture the subjects (for the default template `cdc.>`). walx never creates or alters streams; publishing to subjects with no stream fails and is retried by the retry policy, so create the stream first.
 - Connection: `sink.url` may be a comma-separated list (schemes `nats`, `tls`, `ws`, `wss`); credentials go in the URL. An unreachable server at startup is an error; later outages reconnect forever.
-- The ack wait is 30s when `sink.timeout` is unset, otherwise `sink.timeout`.
+- The ack wait is `sink.timeout` (default 60s); 30s only when `sink.timeout` is `0s`.
 - Deduplication: `Nats-Msg-Id` is `Event.ID`, so the stream drops a retried batch within its duplicate window (`duplicate_window`, 2 minutes by default). Set it above your longest expected outage if you rely on it. If a message of a batch fails while later ones were accepted, the retry republishes the whole batch, so those later events can appear twice and out of order beyond the window. Consumers still dedupe by `id`.
 - A message bigger than the server's maximum payload is a permanent error.
 

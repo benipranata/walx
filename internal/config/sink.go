@@ -17,7 +17,8 @@ type SinkConfig struct {
 	// tables, not read from the file, so a sink can build a state token.
 	FSMColumns map[string]string `yaml:"-"`
 
-	// Timeout bounds one Send call; 0 = no timeout. A timed-out call is
-	// retried, so a late success can duplicate events (dedupe by Event.ID).
+	// Timeout bounds one Send attempt; default 60s, 0 = no timeout. A
+	// timed-out call is retried, so a late success can duplicate events
+	// (dedupe by Event.ID).
 	Timeout time.Duration `yaml:"timeout"`
 }

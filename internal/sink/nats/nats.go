@@ -16,7 +16,7 @@ import (
 
 const (
 	// DefaultAckWait bounds the wait for a batch's acks when the Send context
-	// has no deadline (sink.timeout sets one).
+	// has no deadline (sink.timeout, default 60s, sets one).
 	DefaultAckWait = 30 * time.Second
 
 	// chunkSize is how many messages are in flight before their acks are
