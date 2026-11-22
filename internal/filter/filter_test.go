@@ -351,3 +351,41 @@ func TestChainDropColumnsNoCopyWhenUntouched(t *testing.T) {
 	out := c.Apply(event.Batch{Events: []*event.Event{in}})
 	require.Same(t, in, out.Events[0])
 }
+
+func TestChainFSMTransitionsNotCollapsed(t *testing.T) {
+	step := func(seq string, from, to string) *event.Event {
+		return &event.Event{ID: "db-5-" + seq, Op: event.OpUpdate, Schema: "public", Table: "orders",
+			Before: map[string]any{"id": 1, "status": from, "note": "n"},
+			After:  map[string]any{"id": 1, "status": to, "note": "n"},
+			Key:    map[string]any{"id": 1}}
+	}
+	tests := []struct {
+		name  string
+		table config.TableConfig
+	}{
+		{"fsm only", config.TableConfig{Name: "public.orders", FSMColumn: "status"}},
+		{"with on_change", config.TableConfig{Name: "public.orders", FSMColumn: "status", OnChange: []string{"status"}}},
+		{"with drop_columns", config.TableConfig{Name: "public.orders", FSMColumn: "status", DropColumns: []string{"note"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := filter.New("db", []config.TableConfig{tt.table}, nil, nil)
+			in := []*event.Event{step("1", "new", "paid"), step("2", "paid", "shipped"), step("3", "shipped", "done")}
+
+			out := c.Apply(event.Batch{Events: in})
+
+			require.Len(t, out.Events, 3)
+			var ids, states []any
+			for _, e := range out.Events {
+				ids = append(ids, e.ID)
+				states = append(states, e.After["status"])
+			}
+			require.Equal(t, []any{"db-5-1", "db-5-2", "db-5-3"}, ids)
+			require.Equal(t, []any{"paid", "shipped", "done"}, states)
+			from, to, ok := out.Events[1].Transition("status")
+			require.True(t, ok)
+			require.Equal(t, "paid", from)
+			require.Equal(t, "shipped", to)
+		})
+	}
+}

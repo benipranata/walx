@@ -186,6 +186,9 @@ func validateTable(t TableConfig, key func(string) string, bad reporter) {
 			bad(key(fmt.Sprintf("ops[%d]", i)), "duplicate op %q", op)
 		}
 	}
+	if i := slices.Index(t.DropColumns, t.FSMColumn); t.FSMColumn != "" && i >= 0 {
+		bad(key(fmt.Sprintf("drop_columns[%d]", i)), "must not drop the fsm_column %q", t.FSMColumn)
+	}
 }
 
 func validateRetry(r RetryConfig, key func(string) string, bad reporter) {

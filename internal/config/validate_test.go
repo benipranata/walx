@@ -68,6 +68,7 @@ func TestValidationErrors(t *testing.T) {
 		{"empty ops", mk("", "    tables:\n      - {name: public.t, ops: []}\n"), "databases[0].tables[0].ops"},
 		{"snapshot is not a table op", mk("", "    tables:\n      - name: public.t\n        ops: [insert, snapshot]\n"), "databases[0].tables[0].ops[1]"},
 		{"name over 58 characters", "databases:\n  - {name: " + strings.Repeat("a", 59) + ", postgres: {url: \"postgres://u@h/d\", slot: s}, sink: {type: stdout}}\n", "databases[0].name"},
+		{"fsm_column also in drop_columns", mk("", "    tables:\n      - name: public.t\n        fsm_column: status\n        drop_columns: [x, status]\n"), "databases[0].tables[0].drop_columns[1]"},
 		{"duplicate op in a table", mk("", "    tables:\n      - name: public.t\n        ops: [insert, update, insert]\n"), "databases[0].tables[0].ops[2]"},
 		{"unix socket same slot", "databases:\n" +
 			"  - {name: a, postgres: {url: \"postgres:///d?host=/var/run/pg\", slot: s}, sink: {type: stdout}}\n" +
