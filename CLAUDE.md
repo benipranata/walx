@@ -78,3 +78,5 @@ Each test gets a throwaway database; tests must drop cluster-wide objects (roles
 ## Commit messages
 
 [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/#specification): `<type>[scope][!]: <description>`. Types: `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, `revert`. Description short, lowercase, imperative, no trailing period. Mark breaking changes with `!` and/or a `BREAKING CHANGE:` footer.
+
+Never mention the plan (task IDs like `T4.5`, milestones like `M4`, "the plan") in a commit title or body: readers of the history do not have the plan. Describe the change itself.
