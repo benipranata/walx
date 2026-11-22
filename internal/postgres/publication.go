@@ -21,6 +21,10 @@ var (
 	ErrPublicationDrift = errors.New("publication differs from config")
 )
 
+// afterPublicationCheck is a test seam run between the existence check and
+// CREATE PUBLICATION, to simulate another session creating it first.
+var afterPublicationCheck func()
+
 // publishable lists the publication ops in the order Postgres prints them.
 var publishable = []event.Op{event.OpInsert, event.OpUpdate, event.OpDelete, event.OpTruncate}
 
@@ -82,10 +86,24 @@ func EnsurePublication(ctx context.Context, pg *pgconn.PgConn, db config.Databas
 			return fmt.Errorf("publication %q: %w (postgres.auto_create is false; run: %s)",
 				spec.Name, ErrPublicationMissing, spec.createSQL())
 		}
-		if err := exec(ctx, pg, spec.createSQL()); err != nil {
+		if afterPublicationCheck != nil {
+			afterPublicationCheck()
+		}
+		err := exec(ctx, pg, spec.createSQL())
+		switch {
+		case err == nil:
+			return nil
+		case pgCode(err) == codeDuplicateObject: // lost a creation race; validate the winner's publication
+			rows, err = query(ctx, pg, pubQuery(spec.Name))
+			if err != nil {
+				return fmt.Errorf("read publication %q: %w", spec.Name, err)
+			}
+			if len(rows) == 0 {
+				return fmt.Errorf("publication %q: %w right after creation", spec.Name, ErrPublicationMissing)
+			}
+		default:
 			return spec.createError(err)
 		}
-		return nil
 	}
 	got, err := parsePub(rows[0])
 	if err != nil {

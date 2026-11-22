@@ -70,6 +70,25 @@ func TestPublicationIntegration(t *testing.T) {
 			require.Equal(t, []string{"a", "b"}, tables(t, "p_ops"))
 			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
 		}},
+		{name: "lost creation race validates the winner", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			cfg := db("p_race", true, false, tbl("public.a"))
+			race := func(create string) {
+				afterPublicationCheck = func() {
+					afterPublicationCheck = nil
+					_, err := admin.Exec(ctx, create)
+					require.NoError(t, err)
+				}
+				t.Cleanup(func() { afterPublicationCheck = nil })
+			}
+			race(`CREATE PUBLICATION p_race FOR TABLE a WITH (publish = 'insert, update', publish_via_partition_root = true)`)
+			require.NoError(t, EnsurePublication(ctx, c.PgConn(), cfg))
+
+			cfg = db("p_race_drift", true, false, tbl("public.a"))
+			race(`CREATE PUBLICATION p_race_drift FOR TABLE a WITH (publish = 'insert')`)
+			err := EnsurePublication(ctx, c.PgConn(), cfg)
+			require.ErrorIs(t, err, ErrPublicationDrift)
+		}},
 		{name: "validate-only fails when missing", run: func(t *testing.T) {
 			c := connect(t, ctx, url)
 			err := EnsurePublication(ctx, c.PgConn(), db("p_missing", false, false))
