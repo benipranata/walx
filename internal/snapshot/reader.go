@@ -28,8 +28,10 @@ func openReader(ctx context.Context, url, snapshot string, chunk int) (*reader, 
 	if err != nil {
 		return nil, err
 	}
-	// Set before BEGIN: SET TRANSACTION SNAPSHOT must be the first statement of the transaction.
-	if _, err := pg.Exec(ctx, "SET idle_in_transaction_session_timeout = 0").ReadAll(); err != nil {
+	// Set before BEGIN: SET TRANSACTION SNAPSHOT must be the first statement of the transaction,
+	// and transaction_timeout starts counting at BEGIN. A database or role default of any of
+	// these would end the long transaction or cancel a chunk.
+	if _, err := pg.Exec(ctx, "SET idle_in_transaction_session_timeout = 0; SET statement_timeout = 0; SET transaction_timeout = 0").ReadAll(); err != nil {
 		_ = pg.Close(context.WithoutCancel(ctx))
 		return nil, fmt.Errorf("pin session settings: %w", err)
 	}

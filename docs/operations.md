@@ -123,6 +123,8 @@ Order of operations, so that nothing between the snapshot and the stream is lost
 2. Run `walx snapshot`. Its consistent point lies after the live slot's start, so every change committed after it is also in the live stream.
 3. Consumers apply both as idempotent upserts. Changes committed before the consistent point are in the snapshot and may also appear in the stream (overlap, harmless). A snapshot row can arrive after a newer live event for the same key, so for exact results load the snapshot into the target before applying the live stream, or compare the `lsn` (a snapshot event's `lsn` is the consistent point, a live event with a higher commit position is newer).
 
+The reader session sets `idle_in_transaction_session_timeout`, `statement_timeout` and `transaction_timeout` to 0, so a role or database default of these cannot cancel a chunk or end the snapshot midway.
+
 Caveats: the snapshot holds a transaction open for its whole run, which delays vacuum of the source; a table without an index on its key sorts the whole table first. Deletes are not represented: rows deleted before the snapshot are simply absent. A NULL in a configured `key` column stops the snapshot (a primary key cannot be NULL). Logs show the table name, never row data or credentials; metrics are not served by this command.
 
 ## Runbook: abandoned slot

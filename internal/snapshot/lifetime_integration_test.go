@@ -73,6 +73,24 @@ ALTER DATABASE CURRENT_DB SET idle_in_transaction_session_timeout = '500ms'`,
 					return nil
 				}
 			}, nil, func(t *testing.T, s *collector) { require.Len(t, s.events(), 20) }},
+		{"a database transaction_timeout does not end the snapshot", `CREATE TABLE a (id int PRIMARY KEY); INSERT INTO a SELECT generate_series(1, 20);
+ALTER DATABASE CURRENT_DB SET transaction_timeout = '200ms'`,
+			func(t *testing.T, cfg *Config, s *collector, _ context.CancelFunc) {
+				cfg.Chunk = 10
+				s.onSend = func(n int) error {
+					if n == 1 {
+						time.Sleep(600 * time.Millisecond)
+					}
+					return nil
+				}
+			}, nil, func(t *testing.T, s *collector) { require.Len(t, s.events(), 20) }},
+		{"a database statement_timeout does not cancel a chunk fetch", `CREATE TABLE a (id int PRIMARY KEY); INSERT INTO a SELECT generate_series(1, 2);
+ALTER DATABASE CURRENT_DB SET statement_timeout = '300ms'`,
+			func(t *testing.T, cfg *Config, s *collector, _ context.CancelFunc) {
+				cfg.Chunk = 10
+				// pg_sleep runs per row inside the FETCH only: 2 rows take 800ms, past the timeout.
+				cfg.Targets = []Target{{Table: "public.a", Where: "pg_sleep(0.4) IS NOT NULL"}}
+			}, nil, func(t *testing.T, s *collector) { require.Len(t, s.events(), 2) }},
 		{"publication_where limits the rows", `CREATE TABLE a (id int PRIMARY KEY); INSERT INTO a SELECT generate_series(1, 20)`,
 			func(t *testing.T, cfg *Config, s *collector, _ context.CancelFunc) {
 				cfg.Tables = []config.TableConfig{{Name: "public.a", PublicationWhere: "id > 5"}}
