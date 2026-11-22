@@ -25,12 +25,13 @@ func New(f File) *Sink { return &Sink{log: appendlog.New(f)} }
 
 // Factory builds the file sink of a database. It opens (and creates if
 // missing) cfg.Path in append mode, so an unusable path is a startup error
-// naming the path.
+// naming the path. A last line torn by a crash is ended first, so the
+// redelivered batch does not glue onto it.
 func Factory(database string, cfg config.SinkConfig) (event.Sink, error) {
 	if cfg.Path == "" {
 		return nil, errors.New("file sink needs sink.path")
 	}
-	l, err := appendlog.Open(cfg.Path)
+	l, err := appendlog.OpenEndingLine(cfg.Path)
 	if err != nil {
 		return nil, fmt.Errorf("file sink %w", err)
 	}

@@ -344,3 +344,35 @@ func TestFactory(t *testing.T) {
 		})
 	}
 }
+
+func TestFactoryEndsTornLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		existing string
+		want     string
+	}{
+		{name: "torn fragment", existing: "{\"id\":\"old\"}\n{\"id\":\"to", want: "{\"id\":\"to\n"},
+		{name: "clean end", existing: "{\"id\":\"old\"}\n", want: "{\"id\":\"old\"}\n"},
+		{name: "empty file", existing: "", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "log.jsonl")
+			require.NoError(t, os.WriteFile(path, []byte(tt.existing), 0o644))
+			s, err := file.Factory("db", config.SinkConfig{Type: "file", Path: path})
+			require.NoError(t, err)
+			require.NoError(t, s.Send(context.Background(), sinktest.Batch("a", 1)))
+			require.NoError(t, s.Close())
+			data, err := os.ReadFile(path)
+			require.NoError(t, err)
+			lines := bytes.Split(bytes.TrimSuffix(data, []byte("\n")), []byte("\n"))
+			var last struct {
+				ID string `json:"id"`
+			}
+			require.NoError(t, json.Unmarshal(lines[len(lines)-1], &last))
+			require.Equal(t, "a-1", last.ID)
+			require.NotContains(t, string(data), "\n\n")
+			require.Contains(t, string(data), tt.want)
+		})
+	}
+}

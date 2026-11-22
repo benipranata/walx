@@ -18,7 +18,7 @@ Appends one JSON line per event to `sink.path` (created with mode `0644`, before
 Caveats:
 
 - A write or fsync error is retried, and the failed attempt may already have left lines or a torn last line, so the retry can repeat lines. After a failed partial write walx starts the retry on a fresh line.
-- A crash can leave a torn last line that walx does not repair on restart: the next line is appended right after it. Readers must skip lines that are not valid JSON and dedupe by `id`.
+- A crash can leave a torn last line. On start walx ends it with a newline, so the next line is never glued onto it; the fragment stays on its own line. Readers must skip lines that are not valid JSON and dedupe by `id`.
 - walx never rotates and never reopens the file. Rotate with copy-and-truncate, or restart walx after moving the file.
 - Two file sinks (or a file sink and a `dlq.path`) must not share a path (config error).
 
