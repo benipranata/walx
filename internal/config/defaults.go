@@ -6,7 +6,10 @@ import (
 	"github.com/benipranata/walx/internal/event"
 )
 
-const defaultShutdownTimeout = 30 * time.Second
+const (
+	defaultShutdownTimeout = 30 * time.Second
+	defaultLagInterval     = 15 * time.Second
+)
 
 // newDatabase returns an entry holding every default that does not depend on
 // the entry's name or tables.

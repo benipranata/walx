@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"net"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -44,6 +45,14 @@ func (c *Config) validate() error {
 
 	if c.ShutdownTimeout <= 0 {
 		bad("shutdown_timeout", "must be positive")
+	}
+	if c.Metrics.LagInterval <= 0 {
+		bad("metrics.lag_interval", "must be positive")
+	}
+	if c.Metrics.Listen != "" {
+		if _, port, err := net.SplitHostPort(c.Metrics.Listen); err != nil || port == "" {
+			bad("metrics.listen", "must look like host:port or :port, got %q", c.Metrics.Listen)
+		}
 	}
 	if len(c.Databases) == 0 {
 		bad("databases", "at least one entry is required")

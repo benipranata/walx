@@ -19,6 +19,7 @@ const DefaultPath = "./config.yaml"
 // Config is the whole of config.yaml.
 type Config struct {
 	ShutdownTimeout time.Duration    `yaml:"shutdown_timeout"` // shared by all databases
+	Metrics         MetricsConfig    `yaml:"metrics"`
 	Databases       []DatabaseConfig `yaml:"databases"`
 }
 
@@ -62,7 +63,7 @@ func Parse(data []byte) (*Config, error) {
 		return nil, errors.Join(errs...)
 	}
 
-	cfg := Config{ShutdownTimeout: defaultShutdownTimeout}
+	cfg := Config{ShutdownTimeout: defaultShutdownTimeout, Metrics: MetricsConfig{LagInterval: defaultLagInterval}}
 	if err := root.Decode(&cfg); err != nil {
 		return nil, keys.name(err)
 	}

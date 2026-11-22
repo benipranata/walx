@@ -24,6 +24,8 @@ func TestParse(t *testing.T) {
 			doc:  mk("", ""),
 			check: func(t *testing.T, cfg *config.Config) {
 				require.Equal(t, 30*time.Second, cfg.ShutdownTimeout)
+				require.Empty(t, cfg.Metrics.Listen, "metrics listener is opt-in")
+				require.Equal(t, 15*time.Second, cfg.Metrics.LagInterval)
 				require.Zero(t, cfg.Databases[0].Sink.Timeout, "no sink timeout by default")
 				require.Len(t, cfg.Databases, 1)
 				d := cfg.Databases[0]
@@ -64,6 +66,9 @@ databases:
 			name: "explicit values",
 			doc: `
 shutdown_timeout: 5s
+metrics:
+  listen: 127.0.0.1:9090
+  lag_interval: 2s
 databases:
   - name: a
     postgres:
@@ -96,6 +101,8 @@ databases:
 `,
 			check: func(t *testing.T, cfg *config.Config) {
 				require.Equal(t, 5*time.Second, cfg.ShutdownTimeout)
+				require.Equal(t, "127.0.0.1:9090", cfg.Metrics.Listen)
+				require.Equal(t, 2*time.Second, cfg.Metrics.LagInterval)
 				d := cfg.Databases[0]
 				require.Equal(t, 45*time.Second, d.Sink.Timeout)
 				require.Equal(t, "s", d.Postgres.Slot)

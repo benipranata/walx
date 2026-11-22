@@ -93,6 +93,9 @@ func TestValidationErrors(t *testing.T) {
 		{"unknown on_permanent_error", mk("", "    on_permanent_error: ignore\n"), "databases[0].on_permanent_error"},
 		{"negative sink timeout", "databases:\n  - name: a\n    postgres: {url: \"postgres://u@h/a\"}\n    sink: {type: stdout, timeout: -1s}\n", "databases[0].sink.timeout"},
 		{"zero shutdown_timeout", "shutdown_timeout: 0s\n" + mk("", ""), "shutdown_timeout"},
+		{"zero lag_interval", "metrics: {lag_interval: 0s}\n" + mk("", ""), "metrics.lag_interval"},
+		{"negative lag_interval", "metrics: {lag_interval: -1s}\n" + mk("", ""), "metrics.lag_interval"},
+		{"listen without port", "metrics: {listen: localhost}\n" + mk("", ""), "metrics.listen"},
 		{"negative shutdown_timeout", "shutdown_timeout: -5s\n" + mk("", ""), "shutdown_timeout"},
 	}
 	for _, tt := range tests {

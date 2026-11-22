@@ -13,6 +13,7 @@ func TestUnknownKeys(t *testing.T) {
 		name, doc, want string
 	}{
 		{"top level", "shutdown_timeouts: 5s\n" + mk("", ""), "shutdown_timeouts"},
+		{"metrics", "metrics:\n  listn: x\n" + mk("", ""), "metrics.listn"},
 		{"database", mk("", "    on_permanent: stop\n"), "databases[0].on_permanent"},
 		{"postgres", mk("      urll: x\n", ""), "databases[0].postgres.urll"},
 		{"retry", mk("", "    retry:\n      attempts: 3\n"), "databases[0].retry.attempts"},
