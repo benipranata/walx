@@ -120,7 +120,7 @@ func TestFaultInjectionIntegration(t *testing.T) {
 					if identity == "FULL" {
 						base = 200
 					}
-					chain := filter.New([]config.TableConfig{{
+					chain := filter.New("fault", []config.TableConfig{{
 						Name: "public.r",
 						Ops:  []event.Op{event.OpInsert, event.OpUpdate},
 					}}, nil, nil)

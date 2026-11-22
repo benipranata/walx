@@ -72,7 +72,7 @@ func TestChainApply(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := filter.New(tt.tables, event.NopMetrics{}, nil)
+			c := filter.New("db1", tt.tables, event.NopMetrics{}, nil)
 			in := event.Batch{Events: tt.in, CommitLSN: 5, EndLSN: 9}
 			orig := append([]*event.Event(nil), tt.in...)
 
@@ -100,7 +100,7 @@ func TestChainEmptyBatch(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			c := filter.New(nil, event.NopMetrics{}, nil)
+			c := filter.New("db1", nil, event.NopMetrics{}, nil)
 			out := c.Apply(event.Batch{Events: tt.in, EndLSN: 42})
 			require.Empty(t, out.Events)
 			require.Equal(t, event.LSN(42), out.EndLSN)
@@ -119,9 +119,9 @@ func TestChainMetricsAndLog(t *testing.T) {
 			"counts every drop, logs first per table and op",
 			true,
 			[]count{
-				{"events_dropped_total", 1, []string{"op", "delete", "table", "public.a"}},
-				{"events_dropped_total", 1, []string{"op", "delete", "table", "public.a"}},
-				{"events_dropped_total", 1, []string{"op", "insert", "table", "public.b"}},
+				{"events_dropped_total", 1, []string{"database", "db1", "op", "delete", "table", "public.a"}},
+				{"events_dropped_total", 1, []string{"database", "db1", "op", "delete", "table", "public.a"}},
+				{"events_dropped_total", 1, []string{"database", "db1", "op", "insert", "table", "public.b"}},
 			},
 			2,
 		},
@@ -138,7 +138,7 @@ func TestChainMetricsAndLog(t *testing.T) {
 			} else {
 				m = nil
 			}
-			c := filter.New([]config.TableConfig{{Name: "public.a"}}, m, log)
+			c := filter.New("db1", []config.TableConfig{{Name: "public.a"}}, m, log)
 
 			c.Apply(event.Batch{Events: []*event.Event{
 				ev(event.OpDelete, "public", "a"), ev(event.OpDelete, "public", "a"), ev(event.OpInsert, "public", "b"),
@@ -150,6 +150,7 @@ func TestChainMetricsAndLog(t *testing.T) {
 				return
 			}
 			require.Equal(t, tt.wantLogs, strings.Count(buf.String(), "\n"))
+			require.Contains(t, buf.String(), "db=db1")
 		})
 	}
 }

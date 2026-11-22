@@ -12,6 +12,7 @@ import (
 
 // Chain drops events by table and op. It never mutates its input.
 type Chain struct {
+	name    string
 	tables  map[string][]event.Op
 	listed  bool
 	metrics event.Metrics
@@ -23,12 +24,17 @@ type Chain struct {
 
 // New builds a Chain from the config tables. With no tables every table
 // passes with the default ops; otherwise unlisted tables are dropped. A nil
-// metrics or log discards counts or log lines.
-func New(tables []config.TableConfig, m event.Metrics, log *slog.Logger) *Chain {
+// metrics or log discards counts or log lines. name is the database name,
+// added to every metric and log line.
+func New(name string, tables []config.TableConfig, m event.Metrics, log *slog.Logger) *Chain {
 	if m == nil {
 		m = event.NopMetrics{}
 	}
+	if log != nil {
+		log = log.With("db", name)
+	}
 	c := &Chain{
+		name:    name,
 		tables:  make(map[string][]event.Op, len(tables)),
 		listed:  len(tables) > 0,
 		metrics: m,
@@ -76,7 +82,7 @@ func (c *Chain) keep(e *event.Event) bool {
 
 func (c *Chain) drop(e *event.Event) {
 	table := e.Schema + "." + e.Table
-	c.metrics.Count("events_dropped_total", 1, "op", string(e.Op), "table", table)
+	c.metrics.Count("events_dropped_total", 1, "database", c.name, "op", string(e.Op), "table", table)
 	if c.log == nil {
 		return
 	}
