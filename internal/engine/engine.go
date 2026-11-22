@@ -58,6 +58,10 @@ type Config struct {
 	// ShutdownTimeout bounds how long a cancelled Run waits for the in-flight
 	// sink call; 30s when <= 0.
 	ShutdownTimeout time.Duration
+
+	// SinkTimeout bounds each Send attempt; 0 = no timeout. An attempt that
+	// hits it fails with context.DeadlineExceeded, an ordinary retryable error.
+	SinkTimeout time.Duration
 }
 
 // Engine runs one database pipeline: a reader goroutine decodes the stream
@@ -105,7 +109,7 @@ func New(cfg Config) *Engine {
 	if cfg.Metrics == nil {
 		e.cfg.Metrics = event.NopMetrics{}
 	}
-	e.send = e.withPermanent(e.withRetry(cfg.Sink.Send))
+	e.send = e.withPermanent(e.withRetry(e.withSinkTimeout(cfg.Sink.Send)))
 	e.confirm = e.confirmToSource
 	e.empty = e.confirmEmpty
 	return e
