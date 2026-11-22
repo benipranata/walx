@@ -232,7 +232,15 @@ func TestEngineIntegration(t *testing.T) {
 		{name: "cancel mid-call finishes the call and confirms its end LSN", run: func(t *testing.T) {
 			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			sink := &memSink{gate: make(chan struct{})}
-			p := startPipeline(t, ctx, url, "s_shutdown", sink, 4, nil)
+			waiting := make(chan struct{})
+			var once sync.Once
+			p := startPipeline(t, ctx, url, "s_shutdown", sink, 4, nil, func(e *Engine) {
+				inner := e.timer
+				e.timer = func(d time.Duration) (<-chan time.Time, func()) {
+					once.Do(func() { close(waiting) })
+					return inner(d)
+				}
+			})
 			before := slotFlush(t, ctx, admin, "s_shutdown")
 			for i := 1; i <= 3; i++ {
 				_, err := admin.Exec(ctx, `INSERT INTO t VALUES ($1)`, i+4000)
@@ -240,7 +248,11 @@ func TestEngineIntegration(t *testing.T) {
 			}
 			require.Eventually(t, func() bool { return p.decoded() >= 1 }, 10*time.Second, 10*time.Millisecond)
 			p.cancel()
-			time.Sleep(200 * time.Millisecond)
+			select {
+			case <-waiting:
+			case <-time.After(10 * time.Second):
+				t.Fatal("engine did not start waiting for the in-flight call")
+			}
 			close(sink.gate)
 			select {
 			case err := <-p.done:

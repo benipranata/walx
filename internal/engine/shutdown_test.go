@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pglogrepl"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/benipranata/walx/internal/config"
 	"github.com/benipranata/walx/internal/event"
@@ -100,6 +101,8 @@ func TestShutdown(t *testing.T) {
 			require.EqualValues(t, 1, sink.closed.Load())
 		}},
 		{name: "a stuck sink hits the shutdown timeout without confirming", run: func(t *testing.T) {
+			// the abandoned send goroutine must be gone once the sink is released
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			src := newFakeSource()
@@ -154,6 +157,8 @@ func TestShutdown(t *testing.T) {
 			require.EqualValues(t, 1, sink.closed.Load())
 		}},
 		{name: "source error first, then a stuck sink and blocking Close, still returns", run: func(t *testing.T) {
+			// the abandoned send goroutine must be gone once the sink is released
+			defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
 			src := newFakeSource()
 			entered := make(chan struct{})
 			release := make(chan struct{})
