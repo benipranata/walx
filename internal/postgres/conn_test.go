@@ -1,10 +1,15 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"fmt"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/jackc/pglogrepl"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
 
@@ -141,6 +146,65 @@ func TestReconnectCancel(t *testing.T) {
 			_, err := c.Reconnect(ctx)
 			require.ErrorIs(t, err, context.DeadlineExceeded)
 			require.Equal(t, 1, resets)
+		})
+	}
+}
+
+func TestShouldLogAttempt(t *testing.T) {
+	tests := []struct {
+		attempt int
+		want    bool
+	}{
+		{1, true}, {2, true}, {5, true},
+		{6, false}, {9, false}, {10, true},
+		{15, false}, {20, true}, {25, false}, {100, true}, {105, false},
+	}
+	for _, tt := range tests {
+		t.Run(fmt.Sprint(tt.attempt), func(t *testing.T) {
+			require.Equal(t, tt.want, shouldLogAttempt(tt.attempt))
+		})
+	}
+}
+
+func TestReconnectLogsAttempts(t *testing.T) {
+	tests := []struct {
+		name     string
+		failures int
+		nilLog   bool
+		want     []string
+		notWant  []string
+	}{
+		{name: "first five logged, sixth silent", failures: 6,
+			want:    []string{"attempt=1", "attempt=5", "boom"},
+			notWant: []string{"attempt=6"}},
+		{name: "every tenth after five", failures: 11,
+			want: []string{"attempt=10"}, notWant: []string{"attempt=9", "attempt=11"}},
+		{name: "nil logger", failures: 2, nilLog: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			c := New(config.PostgresConfig{URL: "x"},
+				config.RetryConfig{Initial: time.Microsecond, Max: time.Microsecond}, nil)
+			if !tt.nilLog {
+				c.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+			}
+			tries := 0
+			c.connect = func(context.Context) (pglogrepl.IdentifySystemResult, error) {
+				tries++
+				if tries > tt.failures {
+					return pglogrepl.IdentifySystemResult{}, nil
+				}
+				return pglogrepl.IdentifySystemResult{}, errors.New("boom")
+			}
+			_, err := c.Reconnect(context.Background())
+			require.NoError(t, err)
+			for _, w := range tt.want {
+				require.Contains(t, buf.String(), w)
+			}
+			for _, w := range tt.notWant {
+				require.NotContains(t, buf.String(), w)
+			}
 		})
 	}
 }

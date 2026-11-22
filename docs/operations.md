@@ -69,7 +69,7 @@ Structured text logs (`log/slog`) go to stderr at info level; there is no log co
 | Level | Message |
 | --- | --- |
 | info | `startup checks passed` (slot, publication, `slot_created`), `set replica identity full` (per table altered), `walx started`, `reconnected`, `shutting down, waiting for in-flight sink call`, `walx stopped` |
-| warn | `sink send failed, retrying`, `reconnecting`, `dropping events by config filter` (first drop per table and op; the rest only counted in `events_dropped_total`), startup warnings (`max_slot_wal_keep_size is -1 ...`, replica identity and key warnings), `slot lag poll failed` |
+| warn | `sink send failed, retrying`, `reconnecting`, `reconnect attempt failed` (attempt number, error and backoff; attempts 1 to 5, then every 10th, so a long outage stays readable), `dropping events by config filter` (first drop per table and op; the rest only counted in `events_dropped_total`), startup warnings (`max_slot_wal_keep_size is -1 ...`, replica identity and key warnings), `slot lag poll failed` |
 | error | `skipping batch after permanent sink error` (full payloads without `dlq.path`; with it the `... written to the dead-letter file` variant without payloads), `sink send failed` and `shutdown timed out` on stop, `database pipeline failed, stopping the others` |
 
 stdout is reserved for the stdout sink's events.

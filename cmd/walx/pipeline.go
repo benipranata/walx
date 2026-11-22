@@ -58,6 +58,7 @@ func (p *pipeline) check(ctx context.Context) (err error) {
 		p.rels.Reset()
 		p.buf.Reset()
 	})
+	p.conn.SetLogger(p.log)
 	if _, err = p.conn.Connect(ctx); err != nil {
 		return err
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +22,11 @@ const (
 
 	defaultConnectTimeout  = 10 * time.Second
 	defaultIdentifyTimeout = 10 * time.Second
+
+	// Reconnect logs the first logEveryAttempt failed attempts, then every
+	// logEvery-th, so a long outage does not flood the log.
+	logEveryAttempt = 5
+	logEvery        = 10
 )
 
 // ErrUnsupportedVersion is returned, wrapped, when the server runs a Postgres
@@ -34,6 +40,7 @@ type Conn struct {
 	initial time.Duration
 	max     time.Duration
 	onReset func()
+	log     *slog.Logger
 	pg      *pgconn.PgConn
 
 	// connect and identifyTimeout are test seams; zero values mean Connect
@@ -57,6 +64,10 @@ func New(pg config.PostgresConfig, retry config.RetryConfig, onReset func()) *Co
 	}
 	return c
 }
+
+// SetLogger sets the logger Reconnect uses for failed attempts; nil (the
+// default) logs nothing.
+func (c *Conn) SetLogger(log *slog.Logger) { c.log = log }
 
 // sessionSettings pins the output formats decode.go parses (hex bytea, ISO
 // dates, shortest round-trip floats, ISO 8601 intervals), whatever the
@@ -105,7 +116,8 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 // Reconnect drops the current connection, calls the reset hook, then dials
 // with exponential backoff (factor 2) until it succeeds or ctx is done. A
 // fatal error (see isFatalConnect) is returned at once, as retrying cannot fix
-// it.
+// it. Failed attempts are logged at warn level (see shouldLogAttempt) with the
+// attempt number, the error and the wait before the next try.
 func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, error) {
 	_ = c.Close(ctx)
 	if c.onReset != nil {
@@ -126,7 +138,11 @@ func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, e
 		if ctx.Err() != nil {
 			return sys, fmt.Errorf("reconnect: %w", errors.Join(ctx.Err(), err))
 		}
-		t := time.NewTimer(backoff(c.initial, c.max, attempt))
+		wait := backoff(c.initial, c.max, attempt)
+		if c.log != nil && shouldLogAttempt(attempt+1) {
+			c.log.Warn("reconnect attempt failed", "attempt", attempt+1, "backoff", wait.String(), "err", err)
+		}
+		t := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			t.Stop()
@@ -134,6 +150,12 @@ func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, e
 		case <-t.C:
 		}
 	}
+}
+
+// shouldLogAttempt reports whether failed attempt n (1-based) is logged: the
+// first logEveryAttempt, then every logEvery-th.
+func shouldLogAttempt(n int) bool {
+	return n <= logEveryAttempt || n%logEvery == 0
 }
 
 // PgConn returns the underlying connection, or nil when not connected.
