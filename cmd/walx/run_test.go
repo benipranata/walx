@@ -15,8 +15,7 @@ func TestRun(t *testing.T) {
 		wantStderr string
 		wantStdout string
 	}{
-		{"snapshot is reserved", []string{"snapshot"}, 1, "walx snapshot: not implemented", ""},
-		{"snapshot with database", []string{"snapshot", "-database", "orders"}, 1, "walx snapshot: not implemented", ""},
+		{"snapshot without a config file", []string{"snapshot", "-config", "/nonexistent/walx.yaml"}, 1, "walx snapshot: config:", ""},
 		{"snapshot with unknown flag", []string{"snapshot", "-nope"}, 2, "flag provided but not defined: -nope", ""},
 		{"snapshot with stray argument", []string{"snapshot", "orders"}, 2, "unexpected argument", ""},
 		{"unknown command", []string{"bogus"}, 2, `unknown command "bogus"`, ""},

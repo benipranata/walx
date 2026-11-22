@@ -24,7 +24,7 @@ Every sink writes the same JSON object per change (field order as below; `before
 | --- | --- |
 | `id` | `<name>-<commitLSN>-<seq>`: the database entry name, the transaction's commit LSN, and the position of the change in the transaction counted from 1 over the raw transaction (before filters; a truncate counts once per table). |
 | `source` | The `databases[].name`. |
-| `op` | `insert`, `update`, `delete`, `truncate` (`snapshot` is reserved for stage 2). |
+| `op` | `insert`, `update`, `delete`, `truncate`, or `snapshot` for a row read by `walx snapshot` (it has `after` and `key` only, and its `lsn` is the snapshot's consistent point). |
 | `before`, `after` | Row images. `before` is only present when the replica identity gives it (see below); a delete has `before` only under `REPLICA IDENTITY FULL` and otherwise just `key`; a truncate has neither. |
 | `key` | The configured `key` columns, default the primary key. For an update it is the new key. A table without a key has none. |
 | `lsn` | WAL start position of the change. Informational only, never an ordering key. |
@@ -48,7 +48,7 @@ The stream describes changes, not table state. Do not treat it as a replica:
 
 - By default only inserts and updates are emitted. Deletes and truncates are off until a table lists them in `ops`, so a consumer that only upserts drifts from the source.
 - Filters (`where`, `on_change`, `drop_columns`, `reference_only`) deliberately remove events and columns.
-- Rows that existed before the slot was created are never streamed; there is no snapshot yet (stage 2). Start consumers from an out-of-band copy if you need current state.
+- Rows that existed before the slot was created are never streamed. Run `walx snapshot` to deliver them as `snapshot` events ([operations](operations.md#snapshot)).
 - Several updates to one row in one transaction produce several events; nothing is collapsed.
 - DDL is not an event. After `ALTER TABLE ... ADD COLUMN` rows simply carry the new column.
 - Soft deletes (`deleted_at`, `status = 'cancelled'`) are ordinary updates.

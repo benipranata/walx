@@ -33,7 +33,7 @@ SIGINT or SIGTERM starts a graceful stop: the in-flight sink call finishes (boun
 | 1 | Config error, startup check failed, a pipeline stopped (sink, Postgres or limit error) or shutdown timed out. A pipeline that returns while walx was not asked to stop is also an error |
 | 2 | Usage error (unknown command or flag) |
 
-`walx snapshot [-database name]` is reserved and exits 1 with "not implemented".
+`walx snapshot` uses the same codes: 0 when finished, 1 for a config, Postgres, sink or interrupted run, 2 for a usage error (bad flag, unknown `-database`, `-table` outside the config).
 
 ## Logging
 
@@ -73,6 +73,31 @@ A slot makes Postgres keep all WAL the consumer has not confirmed. If walx is do
 
 walx only reads and warns; the settings are yours. The cap trades disk safety for the risk of a lost slot, so alert on `walx_wal_status` first.
 
+## Snapshot
+
+`walx snapshot` delivers the rows that exist now as `op: snapshot` events, through the filters and the sink of one `databases` entry. Use it to backfill a new consumer or to resync after a lost slot.
+
+```
+walx snapshot [-config path] [-database name] [-table schema.table]... [-where expr] [-chunk n]
+```
+
+- `-database`: the entry to read. Optional when the config has one entry.
+- `-table`: restrict to these tables (repeatable). Default: the entry's `tables`, or every user table (partitions are read through their root) when it lists none. With a `tables` list, `-table` must name listed tables.
+- `-where`: a SQL boolean expression limiting the rows, only with exactly one selected table, e.g. `-table public.orders -where "created_at > now() - interval '30 days'"`. It runs as one statement in a read-only transaction. The config `where` applies on top, as for live events, and so does `publication_where` (it is ANDed into the read, so the snapshot holds the rows the stream would send).
+- `-chunk`: rows per batch (default 1000). Each chunk is one `Send`, with the entry's `retry`, `on_permanent_error` and `sink.timeout`; a failed chunk stops the snapshot after the retry policy gives up.
+
+How it works: walx creates a temporary logical slot (`walx_snap_<random>`) and exports its snapshot, imports it in a read-only `REPEATABLE READ` transaction on a second connection, and drops the slot at once. Every table is read in that transaction, so the rows are exactly the database as of the slot's consistent point, in key order (the configured `key`, else the primary key; a table with neither is read unordered and its events carry no `key`). The persistent slot, its confirmed position and the stream are never touched. The role needs `REPLICATION` and `SELECT` on the tables (`CONNECT` and the `pg_hba.conf` entry of the stream, see [setup](setup.md)).
+
+Events: `op` is `snapshot`, `lsn` is the consistent point and `id` is `<name>-<consistentLSN>-<seq>` with `seq` counting rows from 1 over the whole snapshot, tables in name order (or in the order of the `tables` list or `-table` flags), before filters. Values render exactly like the `after` of an insert event ([type mapping](events.md#type-mapping)); generated columns are left out as in the stream, and `publication_columns` limits the columns. `commit_ts` is the time the snapshot started and `tx_id` is 0. A rerun gets a new consistent point and therefore new IDs, so IDs only dedupe a retried chunk within one run; consumers must apply snapshot events as idempotent upserts keyed by `key`.
+
+Order of operations, so that nothing between the snapshot and the stream is lost:
+
+1. Start the live walx first (or at least let it create its slot). The slot pins the WAL from its creation on.
+2. Run `walx snapshot`. Its consistent point lies after the live slot's start, so every change committed after it is also in the live stream.
+3. Consumers apply both as idempotent upserts. Changes committed before the consistent point are in the snapshot and may also appear in the stream (overlap, harmless). A snapshot row can arrive after a newer live event for the same key, so for exact results load the snapshot into the target before applying the live stream, or compare the `lsn` (a snapshot event's `lsn` is the consistent point, a live event with a higher commit position is newer).
+
+Caveats: the snapshot holds a transaction open for its whole run, which delays vacuum of the source; a table without an index on its key sorts the whole table first. Deletes are not represented: rows deleted before the snapshot are simply absent. A NULL in a configured `key` column stops the snapshot (a primary key cannot be NULL). Logs show the table name, never row data or credentials; metrics are not served by this command.
+
 ## Runbook: abandoned slot
 
 Symptom: `walx_slot_lag_bytes` keeps growing, disk fills on the source, or `pg_replication_slots` shows an inactive slot with a large backlog. walx never drops slots, so removing a database entry, renaming it (the default slot name changes) or retiring walx leaves the old slot behind.
@@ -101,12 +126,12 @@ A slot is lost when its WAL was removed (`max_slot_wal_keep_size` or `idle_repli
 
 Beware of the one exception: at startup, a slot that does not exist is created when `postgres.auto_create` is true, so a slot someone dropped by hand silently restarts the stream from the current position. Set `auto_create: false` if you want that to be an error.
 
-A resync is a stage 2 snapshot, which is not implemented yet. Until then:
+A resync is a [snapshot](#snapshot):
 
 1. Stop walx and fix the cause (a stuck sink, too small a limit).
 2. Drop the lost slot: `SELECT pg_drop_replication_slot('walx_orders');`
 3. Start walx with `postgres.auto_create: true` (or create the slot by hand). It creates a new slot at the current position and streams from there; events from the gap are not recoverable from walx.
-4. Rebuild the consumers' state from the source tables yourself (a copy taken after step 3 started, applied as idempotent upserts, then the stream applied on top). Events delivered while the copy runs may be older or newer than the copied rows, which is why consumers must apply them idempotently, last write wins by commit order.
+4. Once walx streams again (step 3 created the slot), run `walx snapshot -database orders` to rebuild the consumers' state. Snapshot events and live events may overlap, which is why consumers must apply them idempotently.
 
 ## Postgres versions and privileges
 

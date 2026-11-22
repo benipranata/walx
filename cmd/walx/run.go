@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-const usage = "usage: walx [-config path]\n       walx snapshot [-database name]"
+const usage = "usage: walx [-config path]\n       walx snapshot [-config path] [-database name] [-table schema.table]... [-where expr] [-chunk n]"
 
 // run dispatches args to a subcommand and returns the process exit code: 0 for
 // a clean stop, 1 for a runtime or config error, 2 for a usage error.

@@ -4,7 +4,7 @@ walx is a standalone executable that turns the Postgres write-ahead log (logical
 
 The one rule: a sink returns `nil` only when the batch is durable at the destination, and only then does walx confirm the WAL position. A crash or a failing sink therefore repeats events rather than losing them, so consumers must dedupe by `Event.ID` (see [events](docs/events.md)).
 
-Requires Postgres 18 or later. Snapshot/backfill is not implemented yet (`walx snapshot` exits with "not implemented").
+Requires Postgres 18 or later. `walx snapshot` backfills the current rows of a database through the same filters and sink (see [operations](docs/operations.md#snapshot)).
 
 ## Quick start
 

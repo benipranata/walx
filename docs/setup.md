@@ -36,6 +36,8 @@ With the defaults (`postgres.auto_create` and `postgres.auto_replica_identity` t
 | Ownership of every listed table | `CREATE PUBLICATION ... FOR TABLE` and `ALTER TABLE ... REPLICA IDENTITY FULL` |
 | Superuser | Only when the entry lists no `tables`: `FOR ALL TABLES` needs superuser, also on 18. Otherwise list the tables |
 
+`walx snapshot` needs `REPLICATION` (temporary slot) and `SELECT` on the tables it reads, nothing else.
+
 With both auto options off, only `REPLICATION` and `CONNECT` are needed, plus the objects you create by hand (below).
 
 ## pg_hba.conf
