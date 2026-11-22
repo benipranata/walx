@@ -61,9 +61,24 @@ func TestIdentityPolicyCheckRelation(t *testing.T) {
 		{name: "key inside identity", tables: []config.TableConfig{
 			{Name: "public.t", Ops: []event.Op{del}, Key: []string{"id"}}},
 			rel: identityRel("t", 'd', "id")},
-		{name: "key outside identity without deletes", tables: []config.TableConfig{
+		{name: "key outside identity on update table", tables: []config.TableConfig{
 			{Name: "public.t", Ops: []event.Op{ins, upd}, Key: []string{"email"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "unchanged TOAST"},
+		{name: "key outside identity on default ops", tables: []config.TableConfig{
+			{Name: "public.t", Key: []string{"email"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "key columns email"},
+		{name: "key outside identity on insert-only table", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins}, Key: []string{"email"}}},
+			rel: identityRel("t", 'n')},
+		{name: "key inside identity on update table", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins, upd}, Key: []string{"id"}}},
 			rel: identityRel("t", 'd', "id")},
+		{name: "key outside identity on update table with full", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins, upd}, Key: []string{"email"}}},
+			rel: identityRel("t", 'f')},
+		{name: "key outside identity with column list cannot take full", tables: []config.TableConfig{
+			{Name: "public.t", Key: []string{"email"}, PublicationColumns: []string{"id", "email"}}},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_columns"},
 		{name: "publication_where on updates needs full", tables: []config.TableConfig{
 			{Name: "public.t", PublicationWhere: "status = 'x'"}},
 			rel: identityRel("t", 'd', "id"), wantErr: "publication_where"},

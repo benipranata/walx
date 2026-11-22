@@ -83,7 +83,7 @@ List of columns. An update passes only when one of them changed between `Before`
 List of columns removed from `Before` and `After` (never from the key). Must not contain the `fsm_column`. Events are copied, never mutated. Startup fails when a column does not exist.
 
 ### `databases[].tables[].key`
-List of columns forming `Event.Key`. Default: the primary key. Blank or duplicate names are errors, and startup fails when a column does not exist. Ideally covered by a unique index (startup warns when none is). On a delete the key must lie inside the replica identity: `FULL` covers any column and auto-set applies it for a delete-enabled table.
+List of columns forming `Event.Key`. Default: the primary key. Blank or duplicate names are errors, and startup fails when a column does not exist. Ideally covered by a unique index (startup warns when none is). On a table that publishes `update` or `delete` the key must lie inside the replica identity (deletes carry only that, and an update that leaves a TOASTed key column unchanged carries no value for it): `FULL` covers any column and auto-set applies it, otherwise startup fails naming the table, the columns and the `ALTER TABLE` to run. It cannot be combined with `publication_columns` there. A key that is the primary key or identity index needs nothing.
 
 ### `databases[].tables[].reference_only`
 Bool, default `false`. Emit events without `Before` and `After`: only the key (and the `fsm_column` value in `After`) stays, so the consumer looks up the current row. Runs last, after `where`, `on_change` and `drop_columns`. A reference event has no `Before`, so no from-state; keep full events on tables that need transitions.

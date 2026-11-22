@@ -150,6 +150,32 @@ func TestReplicaIdentityIntegration(t *testing.T) {
 			require.Less(t, time.Since(start), 5*time.Second)
 			require.Equal(t, "d", ident(t, "lock_fsm"))
 		}},
+		{name: "update key outside identity gets full", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE TABLE upd_key (id int primary key, email text not null, body text)`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			cfg := db(true, config.TableConfig{Name: "public.upd_key", Key: []string{"email"}})
+			rep, err := EnsureReplicaIdentity(ctx, c.PgConn(), cfg)
+			require.NoError(t, err)
+			require.Equal(t, []string{"public.upd_key"}, rep.Altered)
+			require.Equal(t, "f", ident(t, "upd_key"))
+		}},
+		{name: "update key outside identity opt out fails", run: func(t *testing.T) {
+			_, err := admin.Exec(ctx, `CREATE TABLE upd_key_opt (id int primary key, email text not null)`)
+			require.NoError(t, err)
+			c := connect(t, ctx, url)
+			_, err = EnsureReplicaIdentity(ctx, c.PgConn(), db(false, config.TableConfig{Name: "public.upd_key_opt", Key: []string{"email"}}))
+			require.ErrorIs(t, err, ErrReplicaIdentity)
+			require.ErrorContains(t, err, "public.upd_key_opt")
+			require.ErrorContains(t, err, "email")
+			require.Equal(t, "d", ident(t, "upd_key_opt"))
+		}},
+		{name: "update key inside identity is left alone", run: func(t *testing.T) {
+			c := connect(t, ctx, url)
+			rep, err := EnsureReplicaIdentity(ctx, c.PgConn(), db(true, config.TableConfig{Name: "public.d_pk", Key: []string{"id"}}))
+			require.NoError(t, err)
+			require.Empty(t, rep.Altered)
+		}},
 		{name: "delete key inside identity is left alone", run: func(t *testing.T) {
 			c := connect(t, ctx, url)
 			rep, err := EnsureReplicaIdentity(ctx, c.PgConn(), db(true, delKey("public.d_pk", "id")))

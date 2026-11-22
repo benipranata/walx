@@ -39,7 +39,8 @@ type IdentityPolicy struct {
 type identityRule struct {
 	needFull  string   // why Before is needed, empty when it is not
 	needKey   bool     // updates or deletes are published
-	deleteKey []string // custom key of a delete-enabled table
+	customKey []string // custom key of a table that publishes updates or deletes
+	keyWhy    string   // what carries only the identity: "updates", "deletes" or both
 	colList   bool     // publication_columns on a table that publishes updates or deletes
 }
 
@@ -77,8 +78,17 @@ func NewIdentityPolicy(db config.DatabaseConfig) *IdentityPolicy {
 		case deletes && len(t.Where) > 0:
 			r.needFull = "where on deletes needs Before"
 		}
-		if deletes {
-			r.deleteKey = t.Key
+		updates := slices.Contains(ops, event.OpUpdate)
+		if len(t.Key) > 0 && (updates || deletes) {
+			r.customKey = t.Key
+			switch {
+			case updates && deletes:
+				r.keyWhy = "updates (an unchanged TOAST key column arrives without a value) and deletes only carry that"
+			case updates:
+				r.keyWhy = "updates (an unchanged TOAST key column arrives without a value) only carry that"
+			default:
+				r.keyWhy = "deletes only carry that"
+			}
 		}
 		p.rules[t.Name] = r
 	}
@@ -124,15 +134,15 @@ func (r identityRule) assess(ti tableIdentity) identityVerdict {
 		return identityVerdict{}
 	}
 	reason := r.needFull
-	if reason == "" && len(r.deleteKey) > 0 {
+	if reason == "" && len(r.customKey) > 0 {
 		var outside []string
-		for _, k := range r.deleteKey {
+		for _, k := range r.customKey {
 			if !slices.Contains(ti.cols, k) {
 				outside = append(outside, k)
 			}
 		}
 		if len(outside) > 0 {
-			reason = fmt.Sprintf("key columns %s are outside the replica identity (%s) and deletes only carry that", strings.Join(outside, ", "), identityName(ti.flag))
+			reason = fmt.Sprintf("key columns %s are outside the replica identity (%s) and %s", strings.Join(outside, ", "), identityName(ti.flag), r.keyWhy)
 		}
 	}
 	if reason != "" && r.colList {
@@ -149,7 +159,7 @@ func (r identityRule) assess(ti tableIdentity) identityVerdict {
 }
 
 // EnsureReplicaIdentity checks the replica identity of every published table
-// of db. Tables that need Before (fsm_column, on_change, where on deletes), or whose custom key a delete would not
+// of db. Tables that need Before (fsm_column, on_change, where on deletes), or whose custom key an update or delete would not
 // carry, get REPLICA IDENTITY FULL when postgres.auto_replica_identity is
 // set (only those not already f, in one transaction); otherwise the ALTER
 // statements are reported in the error. A listed table with no key and no
