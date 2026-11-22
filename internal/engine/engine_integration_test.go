@@ -123,7 +123,7 @@ func TestEngineIntegration(t *testing.T) {
 	defer admin.Close(ctx)
 	_, err = admin.Exec(ctx, `CREATE TABLE t (id int PRIMARY KEY); CREATE TABLE ignored (id int PRIMARY KEY); CREATE PUBLICATION p FOR TABLE t`)
 	require.NoError(t, err)
-	setServerSetting(t, url, "wal_sender_timeout", "3s")
+	setDatabaseSetting(t, url, "wal_sender_timeout", "3s")
 
 	tests := []struct {
 		name string
