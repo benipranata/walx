@@ -58,6 +58,12 @@ func New(pg config.PostgresConfig, retry config.RetryConfig, onReset func()) *Co
 	return c
 }
 
+// sessionSettings pins the output formats decode.go parses (hex bytea, ISO
+// dates, shortest round-trip floats, ISO 8601 intervals), whatever the
+// database or role defaults say. One simple-protocol query, as a walsender
+// accepts nothing else.
+const sessionSettings = `SET datestyle = 'ISO'; SET bytea_output = 'hex'; SET extra_float_digits = 1; SET intervalstyle = 'iso_8601'`
+
 // Connect dials once and returns the IdentifySystem result. It fails on
 // Postgres older than 18.
 func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, error) {
@@ -80,6 +86,10 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 	}
 	ictx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
+	if err := exec(ictx, pg, sessionSettings); err != nil {
+		_ = pg.Close(context.WithoutCancel(ctx))
+		return zero, fmt.Errorf("pin session settings: %w", err)
+	}
 	sys, err := pglogrepl.IdentifySystem(ictx, pg)
 	if err != nil {
 		_ = pg.Close(context.WithoutCancel(ctx))
