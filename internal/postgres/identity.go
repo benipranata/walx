@@ -60,12 +60,17 @@ type identityVerdict struct {
 // tables list every published table only needs a key, and only warns.
 func NewIdentityPolicy(db config.DatabaseConfig) *IdentityPolicy {
 	p := &IdentityPolicy{rules: map[string]identityRule{}, listed: len(db.Tables) > 0}
+	// Postgres rejects UPDATE and DELETE on a published table by the
+	// publication-wide flags, so the key, row filter and column list rules
+	// follow the union of ops, not the table's own.
+	pubOps := PublishOps(db.Tables)
+	pubUpdDel := slices.Contains(pubOps, event.OpUpdate) || slices.Contains(pubOps, event.OpDelete)
 	for _, t := range db.Tables {
 		ops := t.Ops
 		if ops == nil {
 			ops = []event.Op{event.OpInsert, event.OpUpdate}
 		}
-		r := identityRule{needKey: slices.Contains(ops, event.OpUpdate) || slices.Contains(ops, event.OpDelete)}
+		r := identityRule{needKey: pubUpdDel}
 		deletes := slices.Contains(ops, event.OpDelete)
 		r.colList = r.needKey && len(t.PublicationColumns) > 0
 		switch {

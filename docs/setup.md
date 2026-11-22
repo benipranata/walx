@@ -62,7 +62,7 @@ Auto-create, in this order at startup:
 
 Auto-set replica identity (`REPLICA IDENTITY FULL`): a table needs it when its config needs the old row (`fsm_column`, `on_change`, `where` on deletes, or a custom `key` outside the identity columns on a table that publishes updates or deletes; an update that leaves a TOASTed key column unchanged carries no value for it). walx alters only tables not already `FULL`, in one transaction that starts with `SET LOCAL lock_timeout = '10s'` so the `ACCESS EXCLUSIVE` lock cannot hang startup, logs each table (`set replica identity full`) and never touches other tables. This changes a production table: a brief lock, and larger WAL records for updates and deletes. Without ownership, or when another transaction holds a lock, startup fails with the `ALTER TABLE` to run by hand.
 
-Every table that publishes updates or deletes needs a key (primary key, or `REPLICA IDENTITY USING INDEX`, or `FULL`); a listed keyless table fails startup. Tables not in your config (with `FOR ALL TABLES`) only produce a warning, since an insert-only keyless table is harmless.
+Every table that publishes updates or deletes needs a key (primary key, or `REPLICA IDENTITY USING INDEX`, or `FULL`); a listed keyless table fails startup. Postgres decides this per publication, not per table: if any listed table publishes updates or deletes, every listed table needs a key, even one that lists only `insert`. Tables not in your config (with `FOR ALL TABLES`) only produce a warning, since an insert-only keyless table is harmless.
 
 ## Manual setup (opt-out mode)
 

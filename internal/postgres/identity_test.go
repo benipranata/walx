@@ -103,6 +103,22 @@ func TestIdentityPolicyCheckRelation(t *testing.T) {
 		{name: "column list on inserts may take full", tables: []config.TableConfig{
 			{Name: "public.t", Ops: []event.Op{ins}, FSMColumn: "status", PublicationColumns: []string{"id", "status"}}},
 			rel: identityRel("t", 'd', "id"), wantErr: "fsm_column"},
+		{name: "insert-only keyless table next to an updating table fails", tables: []config.TableConfig{
+			tbl("public.t", ins), tbl("public.orders", ins, upd)},
+			rel: identityRel("t", 'n'), wantErr: "UPDATE and DELETE fail"},
+		{name: "insert-only keyless table next to a deleting table fails", tables: []config.TableConfig{
+			tbl("public.t", ins), tbl("public.orders", ins, del)},
+			rel: identityRel("t", 'n'), wantErr: "UPDATE and DELETE fail"},
+		{name: "insert-only keyless table next to insert-only tables is fine", tables: []config.TableConfig{
+			tbl("public.t", ins), tbl("public.orders", ins)},
+			rel: identityRel("t", 'n')},
+		{name: "publication_where on insert-only table needs full when another table updates", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins}, PublicationWhere: "status = 'x'"}, tbl("public.orders", ins, upd)},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_where"},
+		{name: "column list on insert-only table cannot take full when another table updates", tables: []config.TableConfig{
+			{Name: "public.t", Ops: []event.Op{ins}, FSMColumn: "status", PublicationColumns: []string{"id", "status"}},
+			tbl("public.orders", ins, upd)},
+			rel: identityRel("t", 'd', "id"), wantErr: "publication_columns"},
 		{name: "unlisted table under all tables only warns", rel: identityRel("t", 'n'),
 			wantWarn: "UPDATE and DELETE fail"},
 		{name: "unlisted table with key", rel: identityRel("t", 'd', "id")},
