@@ -41,6 +41,14 @@ func replLiteral(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// classifyStart goes by SQLSTATE alone, so a localized server is classified
+// the same. START_REPLICATION raises 42704 (missing slot) and 55000
+// (invalidated slot) while acquiring the slot; a missing publication is a
+// notice after streaming starts, never an error here. 55000 is also raised for
+// a physical slot and for a slot of another database, so ErrSlotLost can be a
+// coarse label there; EnsureSlot checks type, database and plugin first, so
+// that needs a race, and the server text stays wrapped. Option errors use
+// 22023, 0A000, 42602 or XX000 and are not mapped.
 func classifyStart(slot string, err error) error {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -49,9 +57,9 @@ func classifyStart(slot string, err error) error {
 	switch {
 	case pgErr.Code == codeObjectInUse:
 		return fmt.Errorf("slot %q: %w: %w", slot, ErrSlotActive, err)
-	case pgErr.Code == codeUndefinedObject && strings.Contains(pgErr.Message, "replication slot"):
+	case pgErr.Code == codeUndefinedObject:
 		return fmt.Errorf("slot %q: %w: %w", slot, ErrSlotMissing, err)
-	case pgErr.Code == codeNotInPrerequisite && strings.Contains(pgErr.Message, "replication slot"):
+	case pgErr.Code == codeNotInPrerequisite:
 		return fmt.Errorf("slot %q: %w: %w", slot, ErrSlotLost, err)
 	}
 	return fmt.Errorf("start replication on slot %q: %w", slot, err)

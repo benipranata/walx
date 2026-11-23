@@ -34,9 +34,16 @@ func TestClassifyStart(t *testing.T) {
 	}{
 		{name: "active", err: pgErr(codeObjectInUse, `replication slot "s" is active for PID 12`), is: ErrSlotActive},
 		{name: "missing", err: pgErr(codeUndefinedObject, `replication slot "s" does not exist`), is: ErrSlotMissing},
+		{name: "missing localized", err: pgErr(codeUndefinedObject, `le slot de réplication « s » n'existe pas`), is: ErrSlotMissing},
 		{name: "lost", err: pgErr(codeNotInPrerequisite, `can no longer access replication slot "s"`), is: ErrSlotLost},
-		{name: "unrelated 55000", err: pgErr(codeNotInPrerequisite, "something else")},
-		{name: "unrelated undefined", err: pgErr(codeUndefinedObject, `publication "p" does not exist`)},
+		{name: "lost localized", err: pgErr(codeNotInPrerequisite, `Replikationsslot »s« kann nicht mehr verwendet werden`), is: ErrSlotLost},
+		{name: "active localized", err: pgErr(codeObjectInUse, "slot actif"), is: ErrSlotActive},
+		{name: "physical slot", err: pgErr(codeNotInPrerequisite, "cannot use physical replication slot for logical decoding"), is: ErrSlotLost},
+		{name: "option unknown", err: pgErr("22023", `option "proto_version" = "1" is unknown`)},
+		{name: "protocol too new", err: pgErr("0A000", "client sent proto_version=99 but server only supports protocol 4 or lower")},
+		{name: "bad publication_names", err: pgErr("42602", "invalid publication_names syntax")},
+		{name: "unrecognized option", err: pgErr("XX000", "unrecognized pgoutput option: bogus")},
+		{name: "other code", err: pgErr("42809", `cannot use physical replication slot for logical decoding`)},
 		{name: "not a pg error", err: errors.New("conn closed")},
 	}
 	for _, tt := range tests {
