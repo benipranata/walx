@@ -38,7 +38,7 @@ Requirements and behaviour:
 - Connection: `sink.url` may be a comma-separated list (schemes `nats`, `tls`, `ws`, `wss`); credentials go in the URL. An unreachable server at startup is an error; later outages reconnect forever.
 - The ack wait is `sink.timeout` (default 60s); 30s only when `sink.timeout` is `0s`.
 - Deduplication: `Nats-Msg-Id` is `Event.ID`, so the stream drops a retried batch within its duplicate window (`duplicate_window`, 2 minutes by default). Set it above your longest expected outage if you rely on it. If a message of a batch fails while later ones were accepted, the retry republishes the whole batch, so those later events can appear twice and out of order beyond the window. Consumers still dedupe by `id`.
-- A message bigger than the server's maximum payload is a permanent error.
+- A message bigger than the server's maximum payload is a permanent error. Earlier chunks of the batch are already acknowledged, and earlier messages of the same chunk were already handed to the connection and may be in the stream (their acks are not awaited). With `on_permanent_error: skip` or a dead-letter file, the whole batch is skipped or dead-lettered, so some of its events can be in the stream and in the dead-letter file. A replay keeps the original `id`, so the stream dedupes it only within its duplicate window; consumers still dedupe by `id`.
 
 ### Subjects
 

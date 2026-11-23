@@ -72,9 +72,10 @@ func New(pub Publisher, o Options) *Sink {
 // Send publishes the batch in order and returns nil after every ack. An event
 // whose subject cannot be built (an empty token) or whose body cannot be
 // encoded fails the batch with a Permanent error before anything is
-// published, and so does one exceeding the server's maximum payload. Any other failure, a
-// publish error, a missing ack, a stream rejecting the message or the ack
-// wait expiring, is retryable.
+// published. One exceeding the server's maximum payload is also Permanent but
+// is found while publishing, so earlier messages of the batch may already be
+// in the stream. Any other failure, a publish error, a missing ack, a stream
+// rejecting the message or the ack wait expiring, is retryable.
 func (s *Sink) Send(ctx context.Context, b event.Batch) error {
 	if err := ctx.Err(); err != nil {
 		return err
