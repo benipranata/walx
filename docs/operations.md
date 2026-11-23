@@ -10,7 +10,7 @@ Each database delivers its batches serially, in WAL order. When the sink returns
 
 Fail fast: when any pipeline stops, walx cancels the others, lets each finish its in-flight sink call, and exits with code 1. The first error is the one reported.
 
-Connection loss: walx reconnects with the same backoff, resumes from the last confirmed position and discards a partly read transaction, which is read again. These stop the process instead of retrying: authentication errors, a server older than 18, a missing or lost slot, a missing publication, and a transaction over `max_tx_bytes` or `max_tx_events`. A slot still active from the dead connection is retried.
+Connection loss: walx reconnects with the same exponential backoff and jitter (`retry.initial`, `retry.max`), resumes from the last confirmed position and discards a partly read transaction, which is read again. These stop the process instead of retrying: authentication errors, a server older than 18, a missing or lost slot, a missing publication, and a transaction over `max_tx_bytes` or `max_tx_events`. A slot still active from the dead connection is retried.
 
 ### Permanent errors
 

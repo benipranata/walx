@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strconv"
 	"strings"
 	"time"
@@ -43,10 +44,11 @@ type Conn struct {
 	log     *slog.Logger
 	pg      *pgconn.PgConn
 
-	// connect and identifyTimeout are test seams; zero values mean Connect
-	// and defaultIdentifyTimeout.
+	// connect, identifyTimeout and jitter are test seams; zero values mean
+	// Connect, defaultIdentifyTimeout and jitterBackoff.
 	connect         func(context.Context) (pglogrepl.IdentifySystemResult, error)
 	identifyTimeout time.Duration
+	jitter          func(time.Duration) time.Duration
 }
 
 // New returns an unconnected Conn. The reconnect backoff uses retry.Initial
@@ -114,9 +116,10 @@ func (c *Conn) Connect(ctx context.Context) (pglogrepl.IdentifySystemResult, err
 }
 
 // Reconnect drops the current connection, calls the reset hook, then dials
-// with exponential backoff (factor 2) until it succeeds or ctx is done. A
-// fatal error (see isFatalConnect) is returned at once, as retrying cannot fix
-// it. Failed attempts are logged at warn level (see shouldLogAttempt) with the
+// with exponential backoff (factor 2, jittered into [d/2, d] so databases
+// reconnecting to one server do not move in lockstep) until it succeeds or ctx
+// is done. A fatal error (see isFatalConnect) is returned at once, as retrying
+// cannot fix it. Failed attempts are logged at warn level (see shouldLogAttempt) with the
 // attempt number, the error and the wait before the next try.
 func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, error) {
 	_ = c.Close(ctx)
@@ -126,6 +129,10 @@ func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, e
 	connect := c.Connect
 	if c.connect != nil {
 		connect = c.connect
+	}
+	jitter := jitterBackoff
+	if c.jitter != nil {
+		jitter = c.jitter
 	}
 	for attempt := 0; ; attempt++ {
 		sys, err := connect(ctx)
@@ -138,7 +145,7 @@ func (c *Conn) Reconnect(ctx context.Context) (pglogrepl.IdentifySystemResult, e
 		if ctx.Err() != nil {
 			return sys, fmt.Errorf("reconnect: %w", errors.Join(ctx.Err(), err))
 		}
-		wait := backoff(c.initial, c.max, attempt)
+		wait := jitter(backoff(c.initial, c.max, attempt))
 		if c.log != nil && shouldLogAttempt(attempt+1) {
 			c.log.Warn("reconnect attempt failed", "attempt", attempt+1, "backoff", wait.String(), "err", err)
 		}
@@ -227,4 +234,13 @@ func backoff(initial, max time.Duration, attempt int) time.Duration {
 		d *= 2
 	}
 	return min(d, max)
+}
+
+// jitterBackoff returns a random duration in [d/2, d], so the cap holds.
+func jitterBackoff(d time.Duration) time.Duration {
+	half := d / 2
+	if half <= 0 {
+		return d
+	}
+	return half + rand.N(d-half+1)
 }

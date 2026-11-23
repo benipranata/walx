@@ -208,3 +208,63 @@ func TestReconnectLogsAttempts(t *testing.T) {
 		})
 	}
 }
+
+func TestJitterBackoff(t *testing.T) {
+	tests := []struct {
+		name string
+		d    time.Duration
+	}{
+		{name: "second", d: time.Second},
+		{name: "tiny", d: 1},
+		{name: "zero", d: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range 200 {
+				got := jitterBackoff(tt.d)
+				require.GreaterOrEqual(t, got, tt.d/2)
+				require.LessOrEqual(t, got, tt.d)
+			}
+		})
+	}
+}
+
+func TestReconnectUsesJitter(t *testing.T) {
+	tests := []struct {
+		name     string
+		failures int
+		wantIn   []time.Duration
+		wantLog  []string
+	}{
+		{name: "doubling input, jittered wait", failures: 3,
+			wantIn:  []time.Duration{10 * time.Millisecond, 20 * time.Millisecond, 40 * time.Millisecond},
+			wantLog: []string{"backoff=1ms"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			c := New(config.PostgresConfig{URL: "x"},
+				config.RetryConfig{Initial: 10 * time.Millisecond, Max: time.Second}, nil)
+			c.SetLogger(slog.New(slog.NewTextHandler(&buf, nil)))
+			var got []time.Duration
+			c.jitter = func(d time.Duration) time.Duration {
+				got = append(got, d)
+				return time.Millisecond
+			}
+			tries := 0
+			c.connect = func(context.Context) (pglogrepl.IdentifySystemResult, error) {
+				tries++
+				if tries > tt.failures {
+					return pglogrepl.IdentifySystemResult{}, nil
+				}
+				return pglogrepl.IdentifySystemResult{}, errors.New("boom")
+			}
+			_, err := c.Reconnect(context.Background())
+			require.NoError(t, err)
+			require.Equal(t, tt.wantIn, got)
+			for _, w := range tt.wantLog {
+				require.Contains(t, buf.String(), w)
+			}
+		})
+	}
+}
