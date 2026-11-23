@@ -129,7 +129,7 @@ Order of operations, so that nothing between the snapshot and the stream is lost
 
 The reader session sets `idle_in_transaction_session_timeout`, `statement_timeout` and `transaction_timeout` to 0, so a role or database default of these cannot cancel a chunk or end the snapshot midway.
 
-Caveats: the snapshot holds a transaction open for its whole run, which delays vacuum of the source; a table without an index on its key sorts the whole table first. Deletes are not represented: rows deleted before the snapshot are simply absent. A NULL in a configured `key` column stops the snapshot (a primary key cannot be NULL). Logs show the table name, never row data or credentials; metrics are not served by this command.
+Caveats: the snapshot holds a transaction open for its whole run, which delays vacuum of the source; a table without an index on its key sorts the whole table first. Deletes are not represented: rows deleted before the snapshot are simply absent. A NULL in a configured `key` column stops the snapshot (a primary key cannot be NULL). Logs show the table name, never row data or credentials; `walx snapshot` serves no metrics (`metrics.listen` is ignored), so rows dropped by a filter are only logged (first per table and op), not counted in `walx_events_dropped_total`.
 
 ## Runbook: abandoned slot
 
