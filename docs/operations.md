@@ -100,6 +100,10 @@ A slot makes Postgres keep all WAL the consumer has not confirmed. If walx is do
 
 walx only reads and warns; the settings are yours. The cap trades disk safety for the risk of a lost slot, so alert on `walx_wal_status` first.
 
+## wal_sender_timeout
+
+walx sends a status update every 10s (not configurable), also while the sink is slow or the queue is full, and answers a keepalive that requests a reply at once while it is reading. Postgres asks for such a reply after half of `wal_sender_timeout` without word from the client, so an idle connection survives a timeout below 10s. When reading is paused (the queue behind a slow sink is full) walx only sends the 10s status update, so keep `wal_sender_timeout` above 10s (the default is 60s) and well above your network latency. If Postgres drops the connection anyway, walx reconnects and resumes from the last confirmed position, see [retry](#retry-and-errors).
+
 ## Snapshot
 
 `walx snapshot` delivers the rows that exist now as `op: snapshot` events, through the filters and the sink of one `databases` entry. Use it to backfill a new consumer or to resync after a lost slot.
