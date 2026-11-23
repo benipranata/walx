@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -219,5 +220,72 @@ func TestPublicationIntegration(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, tt.run)
+	}
+}
+
+// TestPublicationAlterOpenTxIntegration records that ALTER PUBLICATION also
+// reaches a transaction already open when it ran: changes made before the
+// ALTER keep the old setting, changes made after it follow the new one.
+func TestPublicationAlterOpenTxIntegration(t *testing.T) {
+	url := startPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	admin, err := pgx.Connect(ctx, url)
+	require.NoError(t, err)
+	defer admin.Close(ctx)
+	_, err = admin.Exec(ctx, `CREATE TABLE a (id int primary key); CREATE TABLE b (id int primary key)`)
+	require.NoError(t, err)
+
+	tests := []struct {
+		name   string
+		create string
+		alter  string
+		want   []string // changes of the open transaction that reach the slot
+	}{
+		{name: "table added", create: `FOR TABLE a`, alter: `SET TABLE a, b`,
+			want: []string{"insert a 1", "insert a 2", "insert b 2"}},
+		{name: "ops changed", create: `FOR TABLE a, b`, alter: `SET (publish = 'update')`,
+			want: []string{"insert a 11", "insert b 11"}},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pub := fmt.Sprintf("p_open_%d", i)
+			_, err := admin.Exec(ctx, `CREATE PUBLICATION `+pub+` `+tt.create)
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, fmt.Sprintf(`SELECT pg_create_logical_replication_slot('%s', 'pgoutput')`, pub))
+			require.NoError(t, err)
+
+			txc, err := pgx.Connect(ctx, url)
+			require.NoError(t, err)
+			defer txc.Close(ctx)
+			base := i*10 + 1
+			_, err = txc.Exec(ctx, "BEGIN")
+			require.NoError(t, err)
+			_, err = txc.Exec(ctx, fmt.Sprintf(`INSERT INTO a VALUES (%d); INSERT INTO b VALUES (%d)`, base, base))
+			require.NoError(t, err)
+			_, err = admin.Exec(ctx, `ALTER PUBLICATION `+pub+` `+tt.alter)
+			require.NoError(t, err)
+			_, err = txc.Exec(ctx, fmt.Sprintf(`INSERT INTO a VALUES (%d); INSERT INTO b VALUES (%d); COMMIT`, base+1, base+1))
+			require.NoError(t, err)
+
+			rows, err := admin.Query(ctx, fmt.Sprintf(`SELECT data FROM pg_logical_slot_get_binary_changes(
+				'%s', NULL, NULL, 'proto_version', '1', 'publication_names', '%s')`, pub, pub))
+			require.NoError(t, err)
+			msgs, err := pgx.CollectRows(rows, pgx.RowTo[[]byte])
+			require.NoError(t, err)
+			rel := map[uint32]string{}
+			var got []string
+			for _, raw := range msgs {
+				m, err := pglogrepl.Parse(raw)
+				require.NoError(t, err)
+				switch v := m.(type) {
+				case *pglogrepl.RelationMessage:
+					rel[v.RelationID] = v.RelationName
+				case *pglogrepl.InsertMessage:
+					got = append(got, "insert "+rel[v.RelationID]+" "+string(v.Tuple.Columns[0].Data))
+				}
+			}
+			require.Equal(t, tt.want, got)
+		})
 	}
 }
